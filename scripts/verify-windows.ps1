@@ -129,12 +129,14 @@ foreach ($version in @('0.0.113', '0.0.114')) {
         Assert-True ($publicKey.VerifyData($payload, [Convert]::FromBase64String($manifest.signature),
             [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)) 'Signed update manifest failed verification'
     } finally { $publicKey.Dispose() }
-    # Trust only the pinned public local-signing certificate in this ephemeral runner.
+    # Trust only this pinned public certificate in the disposable hosted machine.
+    # CurrentUser Root demands interactive consent; the hosted administrator's
+    # LocalMachine Root supports unattended import without changing revocation policy.
     $cer = Join-Path $root 'pinned-signer.cer'
     [IO.File]::WriteAllBytes($cer, $signature.SignerCertificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
     $null = Invoke-BoundedCertificateStep "Trust pinned public certificate in disposable runner for $version" {
         param($CertificatePath)
-        Import-Certificate -FilePath $CertificatePath -CertStoreLocation Cert:\CurrentUser\Root -ErrorAction Stop | Out-Null
+        Import-Certificate -FilePath $CertificatePath -CertStoreLocation Cert:\LocalMachine\Root -ErrorAction Stop | Out-Null
     } @($cer)
     $null = Assert-Signature $path
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence "manifest-$version.json") -Encoding utf8
