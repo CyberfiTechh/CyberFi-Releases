@@ -63,26 +63,64 @@ function Invoke-BoundedCertificateStep([string]$Stage, [scriptblock]$Action, [ob
         Remove-Job -Job $job -Force
     }
 }
-function Assert-Signature([string]$Path) {
+function Read-BoundedSignature([string]$Path) {
     $value = Invoke-BoundedCertificateStep "Validate trusted Authenticode: $([IO.Path]::GetFileName($Path))" {
         param($Candidate)
         $signature = Get-AuthenticodeSignature -LiteralPath $Candidate
         [pscustomobject]@{ Status = [string]$signature.Status
-            Certificate = [Convert]::ToBase64String($signature.SignerCertificate.RawData) }
+            Certificate = $(if ($signature.SignerCertificate) { [Convert]::ToBase64String($signature.SignerCertificate.RawData) } else { $null }) }
     } @($Path)
     $signature = [pscustomobject]@{ Status = $value.Status
-        SignerCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($value.Certificate)) }
+        SignerCertificate = $(if ($value.Certificate) { [Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($value.Certificate)) } else { $null }) }
+    $signature
+}
+function Assert-Signature([string]$Path) {
+    $signature = Read-BoundedSignature $Path
     Assert-True ($signature.SignerCertificate.Thumbprint -ceq $certificateThumbprint -and
         $signature.Status -eq 'Valid') "Unexpected or invalid signature on $Path ($($signature.Status))"
     $signature
 }
+$payloadHashes = @{}
+function Read-LegacyPayloadHash([string]$Installer, [string]$Version) {
+    Assert-True ($Version -in @('0.0.113', '0.0.114')) 'Only the two pinned legacy releases may use payload integrity'
+    $extractor = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+    Assert-True (Test-Path -LiteralPath $extractor) 'Independent NSIS extractor unavailable'
+    $destination = Assert-Owned (Join-Path $root "payload-$Version") $root
+    New-Item -ItemType Directory -Path $destination | Out-Null
+    function Expand-OwnedArchive([string]$Archive, [string]$Output, [string]$Label, [string]$Member = '*') {
+        Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Independently extracting $Label"
+        $log = Join-Path $evidence "extract-$Version-$Label.log"
+        $process = Start-Process -FilePath $extractor -ArgumentList @('x', '-y', $Archive, "-o$Output", $Member) `
+            -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru
+        if (-not $process.WaitForExit(60000)) { $process.Kill($true); throw "Independent $Label extraction timed out" }
+        Assert-True ($process.ExitCode -eq 0) "Independent $Label extraction failed"
+    }
+    Expand-OwnedArchive $Installer $destination 'NSIS'
+    $archive = @(Get-ChildItem -LiteralPath $destination -Recurse -File -Filter app-64.7z)
+    Assert-True ($archive.Count -eq 1) 'Expected exactly one embedded x64 application archive'
+    $inner = Assert-Owned (Join-Path $destination 'inner') $root
+    Expand-OwnedArchive $archive[0].FullName $inner 'inner' 'CyberFi.exe'
+    $digest = (Get-FileHash -LiteralPath (Join-Path $inner 'CyberFi.exe') -Algorithm SHA256).Hash
+    [ordered]@{ version = $Version; trustedInstallerSHA256 = $expected[$Version]; independentInnerSHA256 = $digest;
+        method = '7-Zip extracts NSIS then embedded app-64.7z; NSIS installer is not executed for this reference.'
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence "payload-$Version.json") -Encoding utf8
+    $digest
+}
 function Assert-Installed([string]$Version) {
     Assert-True (Test-Path -LiteralPath $exe) 'Installed executable missing'
     Assert-True ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -eq "$Version.0") 'Installed PE version mismatch'
-    Assert-True ((Assert-Signature $exe).Status -eq 'Valid') 'Installed app must have a valid trusted pinned signature before launch'
+    $digest = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    if ($Version -in @('0.0.113', '0.0.114')) {
+        Assert-True ($payloadHashes[$Version] -and $digest -ceq $payloadHashes[$Version]) 'Legacy installed EXE differs from independently extracted trusted installer payload'
+        $signature = Read-BoundedSignature $exe
+        Assert-True ($signature.Status -eq 'NotSigned') 'Unexpected legacy inner signature state'
+    } else {
+        $signature = Assert-Signature $exe
+    }
     $registry = Get-ItemProperty -LiteralPath $uninstallKey
     Assert-True ($registry.DisplayVersion -eq $Version -and $registry.UninstallString.Contains($installation)) 'Installer registry points elsewhere'
-    [ordered]@{ version = $Version; executable = $exe; sha256 = (Get-FileHash $exe -Algorithm SHA256).Hash; registryVersion = $registry.DisplayVersion }
+    [ordered]@{ version = $Version; executable = $exe; sha256 = $digest; registryVersion = $registry.DisplayVersion;
+        innerSignature = $signature.Status; integrity = $(if ($Version -in @('0.0.113', '0.0.114')) { 'Matches independent extraction of exact pinned, RSA-verified, Valid-signed installer; legacy inner EXE is unsigned.' } else { 'Valid pinned inner Authenticode signature' }) }
 }
 function Assert-Smoke([string]$Path) {
     Assert-True (Test-Path -LiteralPath $Path) "Packaged app did not write $Path"
@@ -139,6 +177,7 @@ foreach ($version in @('0.0.113', '0.0.114')) {
         Import-Certificate -FilePath $CertificatePath -CertStoreLocation Cert:\LocalMachine\Root -ErrorAction Stop | Out-Null
     } @($cer)
     $null = Assert-Signature $path
+    $payloadHashes[$version] = Read-LegacyPayloadHash $path $version
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence "manifest-$version.json") -Encoding utf8
     $installers[$version] = $path
 }
