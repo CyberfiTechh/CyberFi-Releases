@@ -32,7 +32,6 @@ jobs:
             ASSET_ID: ${{ inputs.asset_id }}
             EXPECTED_SHA: ${{ inputs.sha256 }}
             GH_TOKEN: ${{ github.token }}
-            ARTIFACTS: ${{ runner.temp }}/cyberfi-native
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
               with:
@@ -49,6 +48,8 @@ jobs:
             - name: Verify the immutable candidate and native architecture
               run: |
                   set -euo pipefail
+                  ARTIFACTS="$RUNNER_TEMP/cyberfi-native"
+                  echo "ARTIFACTS=$ARTIFACTS" >> "$GITHUB_ENV"
                   [[ "$RELEASE_ID" =~ ^[0-9]+$ && "$ASSET_ID" =~ ^[0-9]+$ ]]
                   [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
                   case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
