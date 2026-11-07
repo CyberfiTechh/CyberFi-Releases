@@ -24,6 +24,9 @@ permissions:
 jobs:
     native:
         if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        # GitHub requires push authority to read unpublished release assets.
+        permissions:
+            contents: write
         runs-on: ${{ inputs.architecture == 'arm64' && 'macos-15' || 'macos-15-intel' }}
         timeout-minutes: 30
         env:
