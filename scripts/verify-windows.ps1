@@ -49,10 +49,31 @@ Assert-True (-not (Test-Path -LiteralPath $userData)) 'Runner CyberFi profile mu
 $happy = Join-Path $ownedHome '.happy'
 New-Item -ItemType Directory -Path $ownedHome, $userData, $happy -Force | Out-Null
 
+function Invoke-BoundedCertificateStep([string]$Stage, [scriptblock]$Action, [object[]]$Arguments) {
+    Write-Host "[$([DateTime]::UtcNow.ToString('o'))] $Stage"
+    $job = Start-Job -ScriptBlock $Action -ArgumentList $Arguments
+    try {
+        Assert-True ($null -ne (Wait-Job -Job $job -Timeout 60)) "$Stage exceeded 60 seconds"
+        $value = Receive-Job -Job $job -ErrorAction Stop
+        Assert-True ($job.State -eq 'Completed') "$Stage failed"
+        Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Completed: $Stage"
+        $value
+    } finally {
+        if ($job.State -eq 'Running') { Stop-Job -Job $job }
+        Remove-Job -Job $job -Force
+    }
+}
 function Assert-Signature([string]$Path) {
-    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $value = Invoke-BoundedCertificateStep "Validate trusted Authenticode: $([IO.Path]::GetFileName($Path))" {
+        param($Candidate)
+        $signature = Get-AuthenticodeSignature -LiteralPath $Candidate
+        [pscustomobject]@{ Status = [string]$signature.Status
+            Certificate = [Convert]::ToBase64String($signature.SignerCertificate.RawData) }
+    } @($Path)
+    $signature = [pscustomobject]@{ Status = $value.Status
+        SignerCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($value.Certificate)) }
     Assert-True ($signature.SignerCertificate.Thumbprint -ceq $certificateThumbprint -and
-        $signature.Status -in @('Valid', 'NotTrusted', 'UnknownError')) "Unexpected or invalid signature on $Path ($($signature.Status))"
+        $signature.Status -eq 'Valid') "Unexpected or invalid signature on $Path ($($signature.Status))"
     $signature
 }
 function Assert-Installed([string]$Version) {
@@ -94,7 +115,14 @@ foreach ($version in @('0.0.113', '0.0.114')) {
     Assert-True ((Get-Content "$path.sha256" -Raw).Split()[0] -ceq $expected[$version]) 'Published SHA256 sidecar mismatch'
     $manifest = Get-Content "$path.update.json" -Raw | ConvertFrom-Json
     Assert-True ($manifest.sha256 -ceq $expected[$version] -and $manifest.size -eq (Get-Item $path).Length) 'Manifest digest/size mismatch'
-    $signature = Assert-Signature $path
+    # Parse the embedded signer offline before any WinVerifyTrust/AIA chain lookup.
+    # Integrity and signer identity are still independently pinned, then trust must be Valid.
+    Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Extracting pinned embedded signer for $version"
+    $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+        [Security.Cryptography.X509Certificates.X509Certificate]::CreateFromSignedFile($path))
+    Assert-True ($certificate.Thumbprint -ceq $certificateThumbprint) 'Embedded signer pin mismatch'
+    $signature = [pscustomobject]@{ SignerCertificate = $certificate }
+    Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Verifying RSA update manifest for $version"
     $publicKey = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($signature.SignerCertificate)
     try {
         $payload = [Text.Encoding]::UTF8.GetBytes("$version`n$name`n$($manifest.sha256)`n$($manifest.size)`n")
@@ -104,8 +132,11 @@ foreach ($version in @('0.0.113', '0.0.114')) {
     # Trust only the pinned public local-signing certificate in this ephemeral runner.
     $cer = Join-Path $root 'pinned-signer.cer'
     [IO.File]::WriteAllBytes($cer, $signature.SignerCertificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-    Import-Certificate -FilePath $cer -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-    Assert-True ((Get-AuthenticodeSignature $path).Status -eq 'Valid') 'Pinned Authenticode signature did not validate'
+    $null = Invoke-BoundedCertificateStep "Trust pinned public certificate in disposable runner for $version" {
+        param($CertificatePath)
+        Import-Certificate -FilePath $CertificatePath -CertStoreLocation Cert:\CurrentUser\Root -ErrorAction Stop | Out-Null
+    } @($cer)
+    $null = Assert-Signature $path
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence "manifest-$version.json") -Encoding utf8
     $installers[$version] = $path
 }
