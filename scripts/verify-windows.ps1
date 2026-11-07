@@ -200,6 +200,13 @@ $env:HAPPY_HOME_DIR = $happy
 $env:HOME = $ownedHome
 $env:USERPROFILE = $ownedHome
 if ($Mcp115) {
+    # Electron consults these Windows paths before the packaged QA guard runs.
+    # Keep its startup/cache folders outside the deliberately empty test HOME.
+    $env:APPDATA = Join-Path $root 'appdata'
+    $env:LOCALAPPDATA = Join-Path $root 'localappdata'
+    $env:TEMP = Join-Path $root 'launcher-tmp'
+    $env:TMP = $env:TEMP
+    New-Item -ItemType Directory -Path $env:APPDATA, $env:LOCALAPPDATA, $env:TEMP -Force | Out-Null
     $exe = Join-Path $payloadDirectories['0.0.115'] 'CyberFi.exe'
     Assert-True ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -eq '0.0.115.0') '115 payload PE version mismatch'
     $null = Assert-Signature $exe
