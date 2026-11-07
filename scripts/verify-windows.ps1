@@ -196,6 +196,13 @@ foreach ($version in $versions) {
 foreach ($name in @((Get-ChildItem Env: | Where-Object { $_.Name -match 'TOKEN|SECRET|PASSWORD|CREDENTIAL' }).Name) + @('HAPPY_AGENT_SERVER_SOCKET_PATH')) {
     Remove-Item "Env:$name" -ErrorAction SilentlyContinue
 }
+if ($Mcp115) {
+    # Certificate inspection launches PowerShell. Finish it before overriding
+    # USERPROFILE so PowerShell cannot seed AppData inside the fresh test HOME.
+    $exe = Join-Path $payloadDirectories['0.0.115'] 'CyberFi.exe'
+    Assert-True ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -eq '0.0.115.0') '115 payload PE version mismatch'
+    $null = Assert-Signature $exe
+}
 $env:HAPPY_DESKTOP_WINDOWS_HIDDEN = '1'
 $env:HAPPY_HOME_DIR = $happy
 $env:HOME = $ownedHome
@@ -208,9 +215,6 @@ if ($Mcp115) {
     $env:TEMP = Join-Path $root 'launcher-tmp'
     $env:TMP = $env:TEMP
     New-Item -ItemType Directory -Path $env:APPDATA, $env:LOCALAPPDATA, $env:TEMP -Force | Out-Null
-    $exe = Join-Path $payloadDirectories['0.0.115'] 'CyberFi.exe'
-    Assert-True ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -eq '0.0.115.0') '115 payload PE version mismatch'
-    $null = Assert-Signature $exe
     [ordered]@{ purpose = 'CyberFi isolated MCP acceptance'; home = $ownedHome; userData = $userData } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'owned-acceptance.json') -Encoding utf8
     $env:CYBERFI_MCP_ACCEPTANCE = '1'
@@ -218,6 +222,9 @@ if ($Mcp115) {
     $env:CYBERFI_MCP_ACCEPTANCE_REPORT = Join-Path $root 'mcp-acceptance.json'
     $env:ACCEPTANCE_EXE = $exe
     $env:ACCEPTANCE_USER_DATA = $userData
+    $homeBefore = @(Get-ChildItem -LiteralPath $ownedHome -Force -Recurse | Select-Object FullName, Mode)
+    ConvertTo-Json -InputObject $homeBefore -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'qa-home-before-launch.json') -Encoding utf8
+    Assert-True ($homeBefore.Count -eq 0) 'QA HOME was populated by preparation before Electron launched'
     @'
 import assert from 'node:assert/strict';
 import { gymElectronProcessRun } from './packages/happy-desktop-gym/sources/electron/launch.ts';
