@@ -1,0 +1,98 @@
+name: Verify CyberFi macOS package
+run-name: Verify macOS ${{ inputs.architecture }} asset ${{ inputs.asset_id }}
+
+on:
+    workflow_dispatch:
+        inputs:
+            architecture:
+                type: choice
+                options: [x64, arm64]
+                required: true
+            release_id:
+                type: string
+                required: true
+            asset_id:
+                type: string
+                required: true
+            sha256:
+                type: string
+                required: true
+
+permissions:
+    contents: read
+
+jobs:
+    native:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        runs-on: ${{ inputs.architecture == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+        timeout-minutes: 30
+        env:
+            ARCH: ${{ inputs.architecture }}
+            RELEASE_ID: ${{ inputs.release_id }}
+            ASSET_ID: ${{ inputs.asset_id }}
+            EXPECTED_SHA: ${{ inputs.sha256 }}
+            GH_TOKEN: ${{ github.token }}
+            ARTIFACTS: ${{ runner.temp }}/cyberfi-native
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Install the public upstream smoke launcher
+              run: pnpm install --frozen-lockfile --ignore-scripts
+            - name: Verify the immutable candidate and native architecture
+              run: |
+                  set -euo pipefail
+                  [[ "$RELEASE_ID" =~ ^[0-9]+$ && "$ASSET_ID" =~ ^[0-9]+$ ]]
+                  [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
+                  case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
+                  test "$(uname -m)" = "$native"
+                  mkdir -p "$ARTIFACTS"
+                  gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" > "$ARTIFACTS/release.json"
+                  jq -e --argjson id "$ASSET_ID" --arg digest "sha256:$EXPECTED_SHA" --arg suffix "-$ARCH.dmg" \
+                    '(.tag_name | startswith("macos-v")) and any(.assets[]; .id == $id and .digest == $digest and (.name | endswith($suffix)))' \
+                    "$ARTIFACTS/release.json" > /dev/null
+                  gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$ASSET_ID" > "$RUNNER_TEMP/candidate.dmg"
+                  printf '%s  %s\n' "$EXPECTED_SHA" "$RUNNER_TEMP/candidate.dmg" | shasum -a 256 -c -
+                  hdiutil verify "$RUNNER_TEMP/candidate.dmg"
+                  mkdir "$RUNNER_TEMP/CyberFi-DMG"
+                  hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/CyberFi-DMG" "$RUNNER_TEMP/candidate.dmg"
+                  app="$RUNNER_TEMP/CyberFi-DMG/CyberFi.app"
+                  test -d "$app"
+                  lipo -verify_arch "$native" "$app/Contents/MacOS/CyberFi"
+                  version="$(jq -r '.tag_name | sub("^macos-v"; "")' "$ARTIFACTS/release.json")"
+                  test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
+                  if [ "$ARCH" = arm64 ]; then codesign --verify --deep --strict "$app"; fi
+                  echo "HAPPY_DESKTOP_ELECTRON_EXECUTABLE=$app/Contents/MacOS/CyberFi" >> "$GITHUB_ENV"
+            - name: Exercise the actual packaged app without showing a window
+              env:
+                  HAPPY_DESKTOP_GYM_PACKAGED: "1"
+                  HAPPY_DESKTOP_GYM_SCREENSHOT: ${{ runner.temp }}/cyberfi-native/welcome.png
+              run: |
+                  unset GH_TOKEN GITHUB_TOKEN
+                  node --import tsx packages/happy-desktop-gym/sources/electron/cli.ts smoke > "$ARTIFACTS/native-smoke.json"
+                  node --input-type=module <<'NODE'
+                  import assert from 'node:assert/strict';
+                  import { readFileSync } from 'node:fs';
+                  const result=JSON.parse(readFileSync(process.env.ARTIFACTS+'/native-smoke.json','utf8'));
+                  assert.equal(result.packaged,true);
+                  assert.equal(result.platform,'darwin');
+                  assert.equal(result.arch,process.env.ARCH);
+                  assert.equal(result.welcomeVisible,true);
+                  assert.equal(result.windowTitle,'CyberFi');
+                  NODE
+            - name: Detach the owned image
+              if: always()
+              run: hdiutil detach "$RUNNER_TEMP/CyberFi-DMG" || true
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberFi-native-${{ inputs.architecture }}-${{ inputs.asset_id }}
+                  path: ${{ runner.temp }}/cyberfi-native
+                  retention-days: 7
