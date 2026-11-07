@@ -1,0 +1,98 @@
+name: Verify packaged CyberFi macOS MCP preparation
+run-name: Verify macOS MCP ${{ inputs.architecture }} asset ${{ inputs.asset_id }}
+
+on:
+    workflow_dispatch:
+        inputs:
+            architecture:
+                type: choice
+                options: [x64, arm64]
+                required: true
+            release_id:
+                type: string
+                required: true
+            asset_id:
+                type: string
+                required: true
+            sha256:
+                type: string
+                required: true
+
+permissions:
+    contents: read
+
+jobs:
+    mcp:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        permissions:
+            contents: write
+        runs-on: ${{ inputs.architecture == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+        timeout-minutes: 50
+        env:
+            ARCH: ${{ inputs.architecture }}
+            RELEASE_ID: ${{ inputs.release_id }}
+            ASSET_ID: ${{ inputs.asset_id }}
+            EXPECTED_SHA: ${{ inputs.sha256 }}
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: acceptance
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  package_json_file: upstream/package.json
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Install public hidden launcher
+              working-directory: upstream
+              run: pnpm install --frozen-lockfile --ignore-scripts
+            - name: Download and verify the exact 115 candidate
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  [[ "$RELEASE_ID" =~ ^[0-9]+$ && "$ASSET_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
+                  case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
+                  test "$(uname -m)" = "$native"
+                  gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" > "$RUNNER_TEMP/release.json"
+                  jq -e --argjson id "$ASSET_ID" --arg sha "sha256:$EXPECTED_SHA" --arg name "CyberFi-0.0.115-$ARCH.dmg" \
+                    '.tag_name == "macos-v0.0.115" and any(.assets[]; .id == $id and .digest == $sha and .name == $name)' "$RUNNER_TEMP/release.json"
+                  gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$ASSET_ID" > "$RUNNER_TEMP/candidate.dmg"
+                  printf '%s  %s\n' "$EXPECTED_SHA" "$RUNNER_TEMP/candidate.dmg" | shasum -a 256 -c -
+                  hdiutil verify "$RUNNER_TEMP/candidate.dmg"
+                  mkdir "$RUNNER_TEMP/CyberFi-MCP-DMG"
+                  hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/CyberFi-MCP-DMG" "$RUNNER_TEMP/candidate.dmg"
+                  app="$RUNNER_TEMP/CyberFi-MCP-DMG/CyberFi.app"
+                  test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.0.115
+                  lipo "$app/Contents/MacOS/CyberFi" -verify_arch "$native"
+                  if [ "$ARCH" = arm64 ]; then codesign --verify --deep --strict "$app"; fi
+            - name: Run production dependency preparation and nine real MCP calls
+              working-directory: upstream
+              run: |
+                  set -euo pipefail
+                  unset GH_TOKEN GITHUB_TOKEN NODE_OPTIONS ELECTRON_RUN_AS_NODE
+                  node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-macos-mcp.mjs" \
+                    "$PWD" "$RUNNER_TEMP/CyberFi-MCP-DMG/CyberFi.app/Contents/MacOS/CyberFi"
+            - name: Detach owned DMG
+              if: always()
+              run: hdiutil detach "$RUNNER_TEMP/CyberFi-MCP-DMG" || true
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberFi-macOS-MCP-${{ inputs.architecture }}-${{ inputs.asset_id }}
+                  path: |
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/mcp-acceptance.json
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/setup-report.json
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/*.setup.log
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/triangle.html
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/triangle.preview.png
+                  include-hidden-files: true
+                  retention-days: 7
