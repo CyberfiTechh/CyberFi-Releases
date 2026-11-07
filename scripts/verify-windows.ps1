@@ -7,6 +7,12 @@ $expected = @{
     '0.0.114' = '3bcbe22f5f338cf0d8cb4d6747c69bd11ca347b649b4bc1c8bb48c4fe9ecdae2'
 }
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+function Receive-PublishedAsset([string]$Url, [string]$Destination) {
+    Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloading $([IO.Path]::GetFileName($Destination))"
+    & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 300 --output $Destination $Url
+    Assert-True ($LASTEXITCODE -eq 0) "Bounded release download failed: $([IO.Path]::GetFileName($Destination)) (curl exit $LASTEXITCODE)"
+    Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloaded $((Get-Item -LiteralPath $Destination).Length) bytes"
+}
 function Assert-Owned([string]$Path, [string]$Root) {
     $full = [IO.Path]::GetFullPath($Path)
     $prefix = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
@@ -68,7 +74,7 @@ function Assert-Smoke([string]$Path) {
 
 $installers = @{}
 foreach ($version in @('0.0.113', '0.0.114')) {
-    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/v$version" -Headers @{ Accept = 'application/vnd.github+json' }
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/v$version" -Headers @{ Accept = 'application/vnd.github+json' } -TimeoutSec 30
     Assert-True (-not $release.draft -and $release.tag_name -ceq "v$version") 'Expected an actual published release'
     $release | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath (Join-Path $evidence "release-$version.json") -Encoding utf8
     $name = "CyberFi-$version-x64.exe"
@@ -76,13 +82,13 @@ foreach ($version in @('0.0.113', '0.0.114')) {
     Assert-True ($asset.Count -eq 1 -and $asset[0].state -eq 'uploaded' -and
         $asset[0].digest -ceq "sha256:$($expected[$version])") 'Immutable installer asset mismatch'
     $path = Join-Path $root $name
-    Invoke-WebRequest "https://github.com/$repo/releases/download/v$version/$name" -OutFile $path
+    Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name" $path
     Assert-True ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $expected[$version]) 'Downloaded installer digest mismatch'
     foreach ($suffix in @('.sha256', '.update.json')) {
         $metadata = @($release.assets | Where-Object { $_.name -ceq "$name$suffix" })
         Assert-True ($metadata.Count -eq 1 -and $metadata[0].state -eq 'uploaded') 'Missing release verification asset'
         $sidecar = "$path$suffix"
-        Invoke-WebRequest "https://github.com/$repo/releases/download/v$version/$name$suffix" -OutFile $sidecar
+        Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name$suffix" $sidecar
         Assert-True ("sha256:$((Get-FileHash $sidecar -Algorithm SHA256).Hash.ToLowerInvariant())" -ceq $metadata[0].digest) 'Verification asset digest mismatch'
     }
     Assert-True ((Get-Content "$path.sha256" -Raw).Split()[0] -ceq $expected[$version]) 'Published SHA256 sidecar mismatch'

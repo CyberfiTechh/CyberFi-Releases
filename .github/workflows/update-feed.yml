@@ -1,0 +1,52 @@
+name: Refresh public update index
+
+on:
+    release:
+        types: [published, edited, deleted]
+    workflow_dispatch:
+    schedule:
+        - cron: "17 */6 * * *"
+
+permissions:
+    contents: write
+
+concurrency:
+    group: cyberfi-update-index
+    cancel-in-progress: false
+
+jobs:
+    index:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false
+        runs-on: ubuntu-24.04
+        timeout-minutes: 5
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+              with:
+                  ref: main
+            - name: Read published release metadata
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+            - name: Write the latest thirty published CyberFi releases
+              shell: python
+              run: |
+                  import json, os, pathlib, re
+                  pages = json.loads((pathlib.Path(os.environ["RUNNER_TEMP"]) / "releases.json").read_text())
+                  releases = [release for page in pages for release in page
+                      if release.get("draft") is False and release.get("published_at")
+                      and re.fullmatch(r"(?:macos-)?v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", release.get("tag_name", ""))]
+                  releases.sort(key=lambda release: (release["published_at"], release["id"]), reverse=True)
+                  index = [{"tag_name": release["tag_name"], "draft": False, "assets": [
+                      {"name": asset["name"], "state": "uploaded"} for asset in release.get("assets", [])
+                      if asset.get("state") == "uploaded" and re.fullmatch(
+                          r"CyberFi-\d+\.\d+\.\d+-(?:x64|arm64)\.(?:exe|dmg)(?:\.(?:update\.json|sha256|verification\.json))?", asset.get("name", ""))
+                  ]} for release in releases[:30]]
+                  pathlib.Path("updates.json").write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            - name: Commit only public update metadata
+              run: |
+                  git add -- updates.json
+                  if git diff --cached --quiet -- updates.json; then exit 0; fi
+                  git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                    commit -m "Refresh published update index" -- updates.json
+                  git pull --rebase origin main
+                  git push origin HEAD:main
