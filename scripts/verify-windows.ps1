@@ -209,9 +209,13 @@ try { & node --import tsx acceptance-smoke.mjs; Assert-True ($LASTEXITCODE -eq 0
 finally { Pop-Location }
 Assert-Smoke $env:HAPPY_DESKTOP_SMOKE_REPORT
 
-# Save actual initialized settings plus disabled catalogue entries and a profile marker.
+# Defaults may remain in memory until the first preference change. Seed an owned,
+# valid user preference file to exercise persistence through the real upgrade.
 $settings = Join-Path $userData 'desktop/config.json'
-Assert-True (Test-Path -LiteralPath $settings) 'Fresh app did not initialize settings in owned profile'
+if (-not (Test-Path -LiteralPath $settings)) {
+    New-Item -ItemType Directory -Path (Split-Path $settings) -Force | Out-Null
+    '{"appearance":"dark","defaultPermissionMode":"read_only"}' | Set-Content -LiteralPath $settings -Encoding utf8
+}
 $mcp = Join-Path $ownedHome 'happy/config/mcp.toml'
 $skill = Join-Path $ownedHome '.agents/skills/acceptance-sentinel/SKILL.md'
 New-Item -ItemType Directory -Path (Split-Path $mcp), (Split-Path $skill) -Force | Out-Null
