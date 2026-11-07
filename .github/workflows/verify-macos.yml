@@ -65,7 +65,7 @@ jobs:
                   hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/CyberFi-DMG" "$RUNNER_TEMP/candidate.dmg"
                   app="$RUNNER_TEMP/CyberFi-DMG/CyberFi.app"
                   test -d "$app"
-                  lipo -verify_arch "$native" "$app/Contents/MacOS/CyberFi"
+                  lipo "$app/Contents/MacOS/CyberFi" -verify_arch "$native"
                   version="$(jq -r '.tag_name | sub("^macos-v"; "")' "$ARTIFACTS/release.json")"
                   test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
                   if [ "$ARCH" = arm64 ]; then codesign --verify --deep --strict "$app"; fi
