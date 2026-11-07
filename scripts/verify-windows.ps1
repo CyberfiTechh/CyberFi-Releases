@@ -1,10 +1,11 @@
-param([switch]$SelfCheck, [string]$UpstreamPath)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
 $expected = @{
     '0.0.113' = 'c1f4e1f2e0b779e5fa808f288255e39b15d01a84cf3e84835e71960333e47deb'
     '0.0.114' = '3bcbe22f5f338cf0d8cb4d6747c69bd11ca347b649b4bc1c8bb48c4fe9ecdae2'
+    '0.0.115' = '5d6334d1d7f516cd13c893ffd7a18d1a6bb2511292ff6946c8ffb9c37608ea5a'
 }
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 function Receive-PublishedAsset([string]$Url, [string]$Destination) {
@@ -20,10 +21,10 @@ function Assert-Owned([string]$Path, [string]$Root) {
     $full
 }
 if ($SelfCheck) {
-    Assert-True ($expected.Count -eq 2) 'Exactly two immutable versions required'
+    Assert-True ($expected.Count -eq 3) 'Exactly three immutable versions required'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
-        Assert-True ($entry.Key -in @('0.0.113', '0.0.114')) 'Unexpected version'
+        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115')) 'Unexpected version'
     }
     Assert-True ($certificateThumbprint -cmatch '^[A-F0-9]{40}$') 'Invalid certificate pin'
     $null = Assert-Owned (Join-Path ([IO.Path]::GetTempPath()) 'owned/item') ([IO.Path]::GetTempPath())
@@ -34,7 +35,11 @@ if ($SelfCheck) {
 }
 Assert-True ($IsWindows -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted' -and
     $env:GITHUB_REPOSITORY -ceq $repo -and $env:GITHUB_REF -eq 'refs/heads/main') 'Only the disposable public Windows runner may install'
-$root = Assert-Owned (Join-Path $env:RUNNER_TEMP 'cyberfi-windows-acceptance') $env:RUNNER_TEMP
+$fromVersion = $(if ($Upgrade115) { '0.0.114' } else { '0.0.113' })
+$toVersion = $(if ($Upgrade115) { '0.0.115' } else { '0.0.114' })
+$versions = $(if ($Mcp115) { @('0.0.115') } else { @($fromVersion, $toVersion) })
+$rootName = $(if ($Mcp115) { 'cyberfi-windows-mcp-115' } elseif ($Upgrade115) { 'cyberfi-windows-upgrade-115' } else { 'cyberfi-windows-acceptance' })
+$root = Assert-Owned (Join-Path $env:RUNNER_TEMP $rootName) $env:RUNNER_TEMP
 Assert-True (-not (Test-Path -LiteralPath $root)) 'Acceptance root must start empty'
 $evidence = Join-Path $root 'evidence'
 New-Item -ItemType Directory -Path $evidence -Force | Out-Null
@@ -44,10 +49,11 @@ $installation = Assert-Owned (Join-Path $root 'installed') $root
 $exe = Join-Path $installation 'CyberFi.exe'
 $ownedHome = Assert-Owned (Join-Path $root 'home') $root
 # NSIS relaunch has no user-data-dir argument; use its real default on the disposable runner.
-$userData = Assert-Owned (Join-Path $env:APPDATA 'CyberFi') $env:APPDATA
+$userData = $(if ($Mcp115) { Assert-Owned (Join-Path $root 'user-data') $root } else { Assert-Owned (Join-Path $env:APPDATA 'CyberFi') $env:APPDATA })
 Assert-True (-not (Test-Path -LiteralPath $userData)) 'Runner CyberFi profile must start empty'
 $happy = Join-Path $ownedHome '.happy'
-New-Item -ItemType Directory -Path $ownedHome, $userData, $happy -Force | Out-Null
+New-Item -ItemType Directory -Path $ownedHome, $userData -Force | Out-Null
+if (-not $Mcp115) { New-Item -ItemType Directory -Path $happy -Force | Out-Null }
 
 function Invoke-BoundedCertificateStep([string]$Stage, [scriptblock]$Action, [object[]]$Arguments) {
     Write-Host "[$([DateTime]::UtcNow.ToString('o'))] $Stage"
@@ -81,8 +87,9 @@ function Assert-Signature([string]$Path) {
     $signature
 }
 $payloadHashes = @{}
-function Read-LegacyPayloadHash([string]$Installer, [string]$Version) {
-    Assert-True ($Version -in @('0.0.113', '0.0.114')) 'Only the two pinned legacy releases may use payload integrity'
+$payloadDirectories = @{}
+function Read-VerifiedPayloadHash([string]$Installer, [string]$Version) {
+    Assert-True ($expected.ContainsKey($Version)) 'Only the pinned releases may be extracted'
     $extractor = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
     Assert-True (Test-Path -LiteralPath $extractor) 'Independent NSIS extractor unavailable'
     $destination = Assert-Owned (Join-Path $root "payload-$Version") $root
@@ -99,7 +106,9 @@ function Read-LegacyPayloadHash([string]$Installer, [string]$Version) {
     $archive = @(Get-ChildItem -LiteralPath $destination -Recurse -File -Filter app-64.7z)
     Assert-True ($archive.Count -eq 1) 'Expected exactly one embedded x64 application archive'
     $inner = Assert-Owned (Join-Path $destination 'inner') $root
-    Expand-OwnedArchive $archive[0].FullName $inner 'inner' 'CyberFi.exe'
+    $member = $(if ($Mcp115) { '*' } else { 'CyberFi.exe' })
+    Expand-OwnedArchive $archive[0].FullName $inner 'inner' $member
+    $payloadDirectories[$Version] = $inner
     $digest = (Get-FileHash -LiteralPath (Join-Path $inner 'CyberFi.exe') -Algorithm SHA256).Hash
     [ordered]@{ version = $Version; trustedInstallerSHA256 = $expected[$Version]; independentInnerSHA256 = $digest;
         method = '7-Zip extracts NSIS then embedded app-64.7z; NSIS installer is not executed for this reference.'
@@ -132,7 +141,7 @@ function Assert-Smoke([string]$Path) {
 }
 
 $installers = @{}
-foreach ($version in @('0.0.113', '0.0.114')) {
+foreach ($version in $versions) {
     $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/v$version" -Headers @{ Accept = 'application/vnd.github+json' } -TimeoutSec 30
     Assert-True (-not $release.draft -and $release.tag_name -ceq "v$version") 'Expected an actual published release'
     $release | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath (Join-Path $evidence "release-$version.json") -Encoding utf8
@@ -177,7 +186,7 @@ foreach ($version in @('0.0.113', '0.0.114')) {
         Import-Certificate -FilePath $CertificatePath -CertStoreLocation Cert:\LocalMachine\Root -ErrorAction Stop | Out-Null
     } @($cer)
     $null = Assert-Signature $path
-    $payloadHashes[$version] = Read-LegacyPayloadHash $path $version
+    $payloadHashes[$version] = Read-VerifiedPayloadHash $path $version
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence "manifest-$version.json") -Encoding utf8
     $installers[$version] = $path
 }
@@ -190,11 +199,40 @@ $env:HAPPY_DESKTOP_WINDOWS_HIDDEN = '1'
 $env:HAPPY_HOME_DIR = $happy
 $env:HOME = $ownedHome
 $env:USERPROFILE = $ownedHome
-$env:HAPPY_DESKTOP_SMOKE_REPORT = Join-Path $evidence 'fresh-113.json'
-$env:HAPPY_DESKTOP_SMOKE_SCREENSHOT = Join-Path $evidence 'fresh-113.png'
-$fresh = Start-Process -FilePath $installers['0.0.113'] -ArgumentList "/S /D=$installation" -WindowStyle Hidden -PassThru
-Assert-True ($fresh.WaitForExit(180000) -and $fresh.ExitCode -eq 0) 'Fresh 113 installation failed'
-$before = Assert-Installed '0.0.113'
+if ($Mcp115) {
+    $exe = Join-Path $payloadDirectories['0.0.115'] 'CyberFi.exe'
+    Assert-True ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -eq '0.0.115.0') '115 payload PE version mismatch'
+    $null = Assert-Signature $exe
+    [ordered]@{ purpose = 'CyberFi isolated MCP acceptance'; home = $ownedHome; userData = $userData } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'owned-acceptance.json') -Encoding utf8
+    $env:CYBERFI_MCP_ACCEPTANCE = '1'
+    $env:CYBERFI_MCP_ACCEPTANCE_ROOT = $root
+    $env:CYBERFI_MCP_ACCEPTANCE_REPORT = Join-Path $root 'mcp-acceptance.json'
+    $env:ACCEPTANCE_EXE = $exe
+    $env:ACCEPTANCE_USER_DATA = $userData
+    @'
+import assert from 'node:assert/strict';
+import { gymElectronProcessRun } from './packages/happy-desktop-gym/sources/electron/launch.ts';
+const result = await gymElectronProcessRun({ executablePath: process.env.ACCEPTANCE_EXE,
+    args: [`--user-data-dir=${process.env.ACCEPTANCE_USER_DATA}`], env: process.env, timeout: 40*60_000 });
+assert.equal(result.exitCode, 0, result.output);
+'@ | Set-Content -LiteralPath (Join-Path $UpstreamPath 'acceptance-mcp.mjs') -Encoding utf8
+    Push-Location $UpstreamPath
+    try { & node --import tsx acceptance-mcp.mjs; Assert-True ($LASTEXITCODE -eq 0) 'Packaged 115 MCP acceptance failed' }
+    finally { Pop-Location }
+    $mcpResult = Get-Content -LiteralPath $env:CYBERFI_MCP_ACCEPTANCE_REPORT -Raw | ConvertFrom-Json
+    Assert-True ($mcpResult.success -and $mcpResult.platform -eq 'win32' -and $mcpResult.arch -eq 'x64' -and
+        $mcpResult.bootstrap.servers.Count -eq 9 -and $mcpResult.calls.Count -eq 9 -and
+        @($mcpResult.bootstrap.servers | Where-Object { $_.state -ne 'ready' }).Count -eq 0 -and
+        @($mcpResult.calls | Where-Object { $_.toolCount -le 0 -or $_.result.isError }).Count -eq 0) 'Nine real MCP calls did not pass'
+    'Signed packaged 115 production MCP bootstrap and nine representative tool calls passed.'
+    return
+}
+$env:HAPPY_DESKTOP_SMOKE_REPORT = Join-Path $evidence "fresh-$fromVersion.json"
+$env:HAPPY_DESKTOP_SMOKE_SCREENSHOT = Join-Path $evidence "fresh-$fromVersion.png"
+$fresh = Start-Process -FilePath $installers[$fromVersion] -ArgumentList "/S /D=$installation" -WindowStyle Hidden -PassThru
+Assert-True ($fresh.WaitForExit(180000) -and $fresh.ExitCode -eq 0) "Fresh $fromVersion installation failed"
+$before = Assert-Installed $fromVersion
 @'
 import assert from 'node:assert/strict';
 import { gymElectronProcessRun } from './packages/happy-desktop-gym/sources/electron/launch.ts';
@@ -205,7 +243,7 @@ assert.equal(result.exitCode, 0, result.output);
 $env:ACCEPTANCE_EXE = $exe
 $env:ACCEPTANCE_USER_DATA = $userData
 Push-Location $UpstreamPath
-try { & node --import tsx acceptance-smoke.mjs; Assert-True ($LASTEXITCODE -eq 0) 'Fresh 113 app launch failed' }
+try { & node --import tsx acceptance-smoke.mjs; Assert-True ($LASTEXITCODE -eq 0) "Fresh $fromVersion app launch failed" }
 finally { Pop-Location }
 Assert-Smoke $env:HAPPY_DESKTOP_SMOKE_REPORT
 
@@ -226,29 +264,67 @@ $marker = Join-Path $userData 'acceptance-sentinel.txt'
 $preserve = @($settings, $mcp, $skill, $marker)
 $hashes = @{}
 foreach ($path in $preserve) { $hashes[$path] = (Get-FileHash $path -Algorithm SHA256).Hash }
+$mcpOriginalLength = (Get-Item -LiteralPath $mcp).Length
 $hashes | ConvertTo-Json | Set-Content (Join-Path $evidence 'preserved-before.json') -Encoding utf8
 
-$env:HAPPY_DESKTOP_SMOKE_REPORT = Join-Path $evidence 'automatic-relaunch-114.json'
-$env:HAPPY_DESKTOP_SMOKE_SCREENSHOT = Join-Path $evidence 'automatic-relaunch-114.png'
+$env:HAPPY_DESKTOP_SMOKE_REPORT = Join-Path $evidence "automatic-relaunch-$toVersion.json"
+$env:HAPPY_DESKTOP_SMOKE_SCREENSHOT = Join-Path $evidence "automatic-relaunch-$toVersion.png"
 $started = Get-Date
 # These are the production updater's exact NSIS arguments; no manual 114 app launch follows.
-$upgrade = Start-Process -FilePath $installers['0.0.114'] -ArgumentList '--updated /S --force-run' -WindowStyle Hidden -PassThru
-Assert-True ($upgrade.WaitForExit(180000) -and $upgrade.ExitCode -eq 0) 'Silent 114 upgrade failed'
+$upgrade = Start-Process -FilePath $installers[$toVersion] -ArgumentList '--updated /S --force-run' -WindowStyle Hidden -PassThru
+Assert-True ($upgrade.WaitForExit(180000) -and $upgrade.ExitCode -eq 0) "Silent $toVersion upgrade failed"
+$after = Assert-Installed $toVersion
+[ordered]@{ installed = $after; installerExitCode = $upgrade.ExitCode; currentSession = (Get-Process -Id $PID).SessionId;
+    processes = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe', 'explorer.exe') } |
+        Select-Object Name, ProcessId, ParentProcessId, SessionId, ExecutablePath, CommandLine) } |
+    ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidence 'post-upgrade-diagnostic.json') -Encoding utf8
 $deadline = (Get-Date).AddSeconds(120)
 while (-not (Test-Path -LiteralPath $env:HAPPY_DESKTOP_SMOKE_REPORT) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
-Assert-Smoke $env:HAPPY_DESKTOP_SMOKE_REPORT
+$hiddenRelaunch = Test-Path -LiteralPath $env:HAPPY_DESKTOP_SMOKE_REPORT
+$nativeWindowEvidence = @()
+if ($hiddenRelaunch) {
+    Assert-Smoke $env:HAPPY_DESKTOP_SMOKE_REPORT
+} else {
+    # NSIS ExecShellAsUser delegates to Explorer, which can omit the installer's
+    # QA-only environment. Observe the real automatic launch on this disposable
+    # runner without activating, launching, or photographing any window.
+    Add-Type -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr window);' -Name NativeWindows -Namespace CyberFiQA
+    $nativeWindowEvidence = @(Get-Process -Name CyberFi -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -eq $exe -and $_.StartTime -ge $started -and $_.MainWindowHandle -ne 0 -and
+        [CyberFiQA.NativeWindows]::IsWindowVisible($_.MainWindowHandle) -and $_.MainWindowTitle -eq 'CyberFi'
+    } | Select-Object Id, Path, StartTime, SessionId, MainWindowTitle, MainWindowHandle)
+    [ordered]@{ installed = $after; installerExitCode = $upgrade.ExitCode; observedNativeWindows = $nativeWindowEvidence;
+        currentSession = (Get-Process -Id $PID).SessionId;
+        processes = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe', 'explorer.exe') } |
+            Select-Object Name, ProcessId, ParentProcessId, SessionId, ExecutablePath, CommandLine) } |
+        ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidence 'post-upgrade-diagnostic.json') -Encoding utf8
+    Assert-True ($nativeWindowEvidence.Count -gt 0) 'No automatic owned CyberFi launch or visible native window was observed; inspect post-upgrade-diagnostic.json'
+    foreach ($process in @(Get-Process -Id $nativeWindowEvidence.Id -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })) {
+        $null = $process.CloseMainWindow()
+        if (-not $process.WaitForExit(10000)) { & taskkill.exe /PID $process.Id /T /F | Out-Null }
+    }
+}
+$deadline = (Get-Date).AddSeconds(30)
 do {
     $running = @(Get-Process -Name CyberFi -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
     if ($running.Count) { Start-Sleep -Milliseconds 250 }
 } while ($running.Count -and (Get-Date) -lt $deadline)
 Assert-True ($running.Count -eq 0) 'Automatically relaunched app did not finish its smoke and flush settings'
-$after = Assert-Installed '0.0.114'
 foreach ($path in $preserve) {
-    Assert-True ((Get-FileHash $path -Algorithm SHA256).Hash -ceq $hashes[$path]) "Settings/catalogue changed during upgrade: $path"
+    if ($path -eq $mcp) {
+        $bytes = [IO.File]::ReadAllBytes($path)
+        Assert-True ($bytes.Length -ge $mcpOriginalLength) 'Existing MCP configuration was truncated'
+        $prefix = [byte[]]::new($mcpOriginalLength)
+        [Array]::Copy($bytes, $prefix, $prefix.Length)
+        Assert-True ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($prefix)) -ceq $hashes[$path]) 'Existing MCP bytes changed; only appended defaults are allowed'
+    } else {
+        Assert-True ((Get-FileHash $path -Algorithm SHA256).Hash -ceq $hashes[$path]) "Settings/catalogue changed during upgrade: $path"
+    }
 }
-Assert-True ((Get-Item $env:HAPPY_DESKTOP_SMOKE_REPORT).LastWriteTime -ge $started) 'Stale relaunch evidence'
+if ($hiddenRelaunch) { Assert-True ((Get-Item $env:HAPPY_DESKTOP_SMOKE_REPORT).LastWriteTime -ge $started) 'Stale relaunch evidence' }
 [ordered]@{ status = 'PASS'; fresh = $before; upgraded = $after; automaticRelaunch = $true;
-    hiddenWindowsVerified = $true; preservedFiles = $preserve; installerArguments = '--updated /S --force-run';
+    hiddenWindowsVerified = $hiddenRelaunch; nativeAutomaticWindow = $nativeWindowEvidence;
+    preservedFiles = $preserve; existingMcpBytesPreserved = $true; installerArguments = '--updated /S --force-run';
     applicationUpdaterDownloadUiTested = $false; note = 'Released installer path tested; app download/button/feed path is a separate test.'
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'result.json') -Encoding utf8
-'Real released 113 install -> 114 silent upgrade and automatic hidden relaunch passed.'
+"Real released $fromVersion install -> $toVersion silent upgrade and automatic relaunch passed."

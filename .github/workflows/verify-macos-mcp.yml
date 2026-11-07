@@ -94,5 +94,6 @@ jobs:
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/*.setup.log
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/triangle.html
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/triangle.preview.png
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/sources-*/assets/mcp/charts/outputs/*.png
                   include-hidden-files: true
                   retention-days: 7

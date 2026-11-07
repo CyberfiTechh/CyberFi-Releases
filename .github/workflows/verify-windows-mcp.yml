@@ -1,0 +1,55 @@
+name: Verify packaged CyberFi Windows MCP preparation
+run-name: Verify Windows 0.0.115 packaged MCP preparation
+
+on:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    mcp:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        runs-on: windows-2025
+        timeout-minutes: 50
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: acceptance
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  package_json_file: upstream/package.json
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Install public hidden launcher
+              working-directory: upstream
+              run: pnpm install --frozen-lockfile --ignore-scripts
+            - name: Self-check pinned release guards
+              shell: pwsh
+              run: ./acceptance/scripts/verify-windows.ps1 -SelfCheck
+            - name: Verify signed 115 payload and run nine production MCP calls
+              shell: pwsh
+              run: ./acceptance/scripts/verify-windows.ps1 -Mcp115 -UpstreamPath "$env:GITHUB_WORKSPACE/upstream"
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberFi-Windows-MCP-0.0.115
+                  path: |
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/evidence
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/mcp-acceptance.json
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/home/.pdr-kocum-agent/mcp-runtime/setup-report.json
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/home/.pdr-kocum-agent/mcp-runtime/*.setup.log
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/triangle.html
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/triangle.preview.png
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/home/.pdr-kocum-agent/mcp-runtime/sources-*/assets/mcp/charts/outputs/*.png
+                  include-hidden-files: true
+                  retention-days: 7
