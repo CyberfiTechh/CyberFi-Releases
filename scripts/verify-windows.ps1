@@ -122,14 +122,15 @@ function Assert-Installed([string]$Version) {
     if ($Version -in @('0.0.113', '0.0.114')) {
         Assert-True ($payloadHashes[$Version] -and $digest -ceq $payloadHashes[$Version]) 'Legacy installed EXE differs from independently extracted trusted installer payload'
         $signature = Read-BoundedSignature $exe
-        Assert-True ($signature.Status -eq 'NotSigned') 'Unexpected legacy inner signature state'
+        Write-Host "Legacy $Version inner native signature state: $($signature.Status); trust is the independently matched, pinned signed-installer payload."
     } else {
         $signature = Assert-Signature $exe
     }
     $registry = Get-ItemProperty -LiteralPath $uninstallKey
     Assert-True ($registry.DisplayVersion -eq $Version -and $registry.UninstallString.Contains($installation)) 'Installer registry points elsewhere'
     [ordered]@{ version = $Version; executable = $exe; sha256 = $digest; registryVersion = $registry.DisplayVersion;
-        innerSignature = $signature.Status; integrity = $(if ($Version -in @('0.0.113', '0.0.114')) { 'Matches independent extraction of exact pinned, RSA-verified, Valid-signed installer; legacy inner EXE is unsigned.' } else { 'Valid pinned inner Authenticode signature' }) }
+        innerSignature = $signature.Status; innerSignerThumbprint = $signature.SignerCertificate.Thumbprint;
+        integrity = $(if ($Version -in @('0.0.113', '0.0.114')) { 'Matches independent extraction of exact pinned, RSA-verified, Valid-signed installer; no legacy inner-signature trust claim.' } else { 'Valid pinned inner Authenticode signature' }) }
 }
 function Assert-Smoke([string]$Path) {
     Assert-True (Test-Path -LiteralPath $Path) "Packaged app did not write $Path"
