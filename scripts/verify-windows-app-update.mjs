@@ -132,7 +132,7 @@ try {
     while (Date.now() < deadline) {
         if (runError || runResult) throw runError ?? new Error(`116 exited before CDP capability: ${runResult.output}`);
         try { const response = await fetch(endpoint + "/json/list", { signal: AbortSignal.timeout(1500) });
-            if (response.ok) { targets = await response.json(); break; } } catch { /* Only loopback startup polling. */ }
+            if (response.ok) { targets = await response.json(); if (targets.some(target => target.type === "page")) break; } } catch { /* Only loopback startup polling. */ }
         await delay(300);
     }
     assert(targets?.some(target => target.type === "page"), "Approved signed116 --debug did not expose a renderer CDP page");
