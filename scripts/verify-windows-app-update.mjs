@@ -47,6 +47,11 @@ async function processes() {
     return Array.isArray(parsed) ? parsed : [parsed];
 }
 try {
+    const engineVersion = (await exec(process.env.ACCEPTANCE_ENGINE_EXE, ["--version"], { env, timeout: 15000, windowsHide: true })).stdout.trim();
+    assert.equal(engineVersion.split(/\s+/u).at(-1), "0.4.117-preview.1");
+    report.engineFixture = { versionOutput: engineVersion, tag: "v0.4.117-preview.1",
+        archiveSHA256: "2b0de452512defd491b5fc8e0b8df1c9dd77618ed164fbfbc7a0b37a9bef3a87",
+        reason: "Already verified deterministic native fixture; prior stable116 fixture ACL startup failed before Electron" };
     runtime = await happyAgentRuntimeCreate(paths, { url: `http://127.0.0.1:${inference.address().port}/inference`,
         token: randomBytes(24).toString("hex"), start: async () => {}, stop: async () => {} });
     report.engineHealth = await runtime.client.health();

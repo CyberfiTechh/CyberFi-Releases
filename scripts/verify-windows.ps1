@@ -278,8 +278,8 @@ if ($InApp117) {
     $engineRoot = Assert-Owned (Join-Path $root 'owned-engine') $root
     New-Item -ItemType Directory -Path $engineRoot | Out-Null
     $archive = Join-Path $engineRoot 'engine.tar.gz'
-    Receive-PublishedAsset 'https://github.com/CyberfiTechh/CyberFi-Engine/releases/download/v0.4.116/happy-agent-0.4.116-win32-x64.tar.gz' $archive
-    Assert-True ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ceq 'c406afd9819b1597a816ca1bef4279f05e134a046efda8ccc82d3b47abecef10') 'Published owned engine fixture digest mismatch'
+    Receive-PublishedAsset 'https://github.com/CyberfiTechh/CyberFi-Engine/releases/download/v0.4.117-preview.1/happy-agent-0.4.117-preview.1-win32-x64.tar.gz' $archive
+    Assert-True ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ceq '2b0de452512defd491b5fc8e0b8df1c9dd77618ed164fbfbc7a0b37a9bef3a87') 'Published owned engine fixture digest mismatch'
     $members = @(& tar -tzf $archive)
     Assert-True ($LASTEXITCODE -eq 0 -and $members.Count -eq 1 -and $members[0] -ceq 'happy-agent-win32-x64.exe') 'Unexpected owned engine archive members'
     & tar -xzf $archive -C $engineRoot
