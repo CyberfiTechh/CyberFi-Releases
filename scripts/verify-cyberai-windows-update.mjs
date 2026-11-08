@@ -374,7 +374,8 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         }
         assert.equal((await page.evaluate(() => window.happyDesktop.runtimeGet())).phase, "ready");
         const oldPid = await listenerPid(); id(oldPid); report.oldPid = oldPid;
-        await page.getByRole("button", { name: /settings|ayarlar|ayarları aç/iu }).first().click();
+        stage = "published target selection";
+        await page.locator('[data-happy-desktop-ui="sidebar-footer"]').getByRole("button", { name: /^(Settings|Ayarlar|Open settings|Ayarları aç)$/iu }).click();
         const general = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await general.count()) await general.click();
         const select = page.locator("#cyberfi-settings-desktop-version"); await select.waitFor({ state: "visible", timeout: 60000 });
         await page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/iu }).first().click();
@@ -437,7 +438,8 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         // Change a real setting through the automatically reopened UI and read
         // the exact owned default-profile file back; surviving bytes alone do
         // not prove the replacement is actually using that profile.
-        await page.getByRole("button", { name: /settings|ayarlar|ayarları aç/iu }).first().click();
+        stage = "automatic target default-profile UI proof";
+        await page.locator('[data-happy-desktop-ui="sidebar-footer"]').getByRole("button", { name: /^(Settings|Ayarlar|Open settings|Ayarları aç)$/iu }).click();
         const targetGeneral = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await targetGeneral.count()) await targetGeneral.click();
         for (const mode of ["light", "dark"]) {
             const theme = page.locator(`[data-happy-desktop-ui="segmented-control-segment"][data-value="${mode}"]`).first(); await theme.waitFor({ state: "visible", timeout: 30000 }); await theme.click();
