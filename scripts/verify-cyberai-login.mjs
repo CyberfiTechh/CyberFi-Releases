@@ -538,13 +538,32 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         }); assert(transport, "Authenticated workspace transport did not open");
         report.checks.authenticatedWorkspaceTransport = true;
         const sockets = new Set(); page.on("websocket", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
-        const marker = randomBytes(16).toString("hex");
-        await page.evaluate(marker => { window.__cyberaiLogoutMarker = marker; window.addEventListener("beforeunload", event => { event.preventDefault(); event.returnValue = "stay"; }); }, marker);
-        stage = "forced main-process logout";
-        await page.getByRole("button", { name: /settings|ayarlar|ayarları aç/iu }).first().click();
+        stage = "logout settings navigation";
+        await page.locator('[data-happy-desktop-ui="sidebar-footer"]').getByRole("button", { name: /^(Settings|Ayarlar|Open settings|Ayarları aç)$/iu }).click();
         const general = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await general.count()) await general.click();
-        const observedSockets = sockets.size; await page.getByRole("button", { name: /^(Çıkış yap|Sign out)$/iu }).click();
+        const signOut = page.getByRole("button", { name: /^(Çıkış yap|Sign out)$/iu });
+        await signOut.waitFor({ state: "visible", timeout: 30000 });
+        // Register a handled STAY response. Playwright's implicit dialog handler
+        // races Electron's authoritative forced reload on macOS; never accept
+        // the dialog, which would bypass the behavior this test must prove.
+        let beforeUnloadSignals = 0, stayDialogs = 0, dismissRaces = 0, unexpectedDialogs = 0, unknownDialogError = false;
+        const dialogSettlements = [];
+        page.on("console", message => { if (message.text() === "cyberai-acceptance-beforeunload-stay") beforeUnloadSignals++; });
+        page.on("dialog", dialog => {
+            if (dialog.type() === "beforeunload") stayDialogs++; else unexpectedDialogs++;
+            dialogSettlements.push(dialog.dismiss().catch(error => {
+                if (/^(?:dialog\.dismiss: )?Protocol error \(Page\.handleJavaScriptDialog\): No dialog is showing\.?$/u.test(String(error?.message ?? "").split("\n", 1)[0])) dismissRaces++;
+                else unknownDialogError = true;
+            }));
+        });
+        const marker = randomBytes(16).toString("hex");
+        await page.evaluate(marker => { window.__cyberaiLogoutMarker = marker; window.addEventListener("beforeunload", event => { event.preventDefault(); event.returnValue = "stay"; console.info("cyberai-acceptance-beforeunload-stay"); }); }, marker);
+        stage = "forced main-process logout";
+        const observedSockets = sockets.size; await signOut.click();
         await waitLogin(); assert.equal(await page.evaluate(() => window.__cyberaiLogoutMarker), undefined, "Logout must replace the document despite beforeunload prevention");
+        await Promise.all(dialogSettlements);
+        assert(beforeUnloadSignals > 0 && unexpectedDialogs === 0 && !unknownDialogError, "The renderer must actually attempt to prevent logout navigation without unrelated dialog errors");
+        report.beforeUnloadProof = { signals: beforeUnloadSignals, requestedStayDialogs: stayDialogs, dismissedDialogRaces: dismissRaces, acceptedDialogs: 0 };
         await denied(); await assert.rejects(lstat(saved), { code: "ENOENT" });
         assert.equal(sockets.size, 0); report.logoutTransportProof = observedSockets ? "Observed workspace WebSockets closed and old document destroyed" : "Old workspace document destroyed; no WebSocket was observed";
         await page.screenshot({ path: join(evidence, "logout.png"), mask: [login().locator('input[name="username"], input[name="password"]')] });
