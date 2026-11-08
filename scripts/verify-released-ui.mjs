@@ -267,6 +267,8 @@ async function main() {
     const arch = process.env.ARCH;
     assert(arch === "x64" || arch === "arm64");
     assert.equal(process.arch, arch);
+    assert(["true", "false"].includes(process.env.UI_ONLY ?? "false"));
+    const uiOnly = process.env.UI_ONLY === "true";
     const version = desktopVersion(process.env.DESKTOP_VERSION);
     const desktopTag = "macos-v" + version;
     const engineTag = engineTagAllowed(process.env.ENGINE_TAG);
@@ -355,28 +357,31 @@ async function main() {
         if (arch === "arm64") command("codesign", ["--verify", "--deep", "--strict", app]);
         const env = cleanEnvironment();
         const smokePath = join(evidence, "packaged-smoke.json");
-        await command(
-            process.execPath,
-            ["--import", "tsx", "packages/happy-desktop-gym/sources/electron/cli.ts", "smoke"],
-            {
-                cwd: upstream,
-                env: {
-                    ...env,
-                    HAPPY_DESKTOP_GYM_PACKAGED: "1",
-                    HAPPY_DESKTOP_ELECTRON_EXECUTABLE: packagedExecutable,
-                    HAPPY_DESKTOP_GYM_SCREENSHOT: join(evidence, "packaged-welcome.png"),
+        let smoke;
+        if (!uiOnly) {
+            await command(
+                process.execPath,
+                ["--import", "tsx", "packages/happy-desktop-gym/sources/electron/cli.ts", "smoke"],
+                {
+                    cwd: upstream,
+                    env: {
+                        ...env,
+                        HAPPY_DESKTOP_GYM_PACKAGED: "1",
+                        HAPPY_DESKTOP_ELECTRON_EXECUTABLE: packagedExecutable,
+                        HAPPY_DESKTOP_GYM_SCREENSHOT: join(evidence, "packaged-welcome.png"),
+                    },
+                    log: smokePath,
                 },
-                log: smokePath,
-            },
-        );
-        const smoke = JSON.parse(await readFile(smokePath, "utf8"));
-        assert(
-            smoke.packaged &&
-                smoke.platform === "darwin" &&
-                smoke.arch === arch &&
-                smoke.welcomeVisible &&
-                smoke.windowTitle === "CyberFi",
-        );
+            );
+            smoke = JSON.parse(await readFile(smokePath, "utf8"));
+            assert(
+                smoke.packaged &&
+                    smoke.platform === "darwin" &&
+                    smoke.arch === arch &&
+                    smoke.welcomeVisible &&
+                    smoke.windowTitle === "CyberFi",
+            );
+        }
         const engineRoot = join(root, "engine");
         await mkdir(engineRoot);
         const tarEntries = command("tar", ["-tzf", engineTar]).trim().split("\n");
@@ -424,29 +429,32 @@ async function main() {
             assert((await lstat(join(publicDist, path))).isFile());
         const publicContext = join(upstream, ".context");
         await mkdir(publicContext, { recursive: true });
-        const roleHarness = join(publicContext, "cyberfi-released-role-qa.mts");
-        const roleReport = join(publicContext, "cyberfi-released-role-qa-report.json");
-        await absent(roleHarness);
-        await cp(join(dirname(fileURLToPath(import.meta.url)), "released-role-harness.mts"), roleHarness);
-        try {
-            await command(process.execPath, ["--import", "tsx", roleHarness], {
-                cwd: upstream,
-                env: {
-                    ...env,
-                    HAPPY_DESKTOP_AGENT_EXECUTABLE: engine,
-                    CYBERFI_RELEASED_RESOURCES: resources,
-                    CYBERFI_ROLE_QA_BINARY_SHA256: await hashFile(engine),
-                    CYBERFI_ROLE_QA_REPORT: roleReport,
-                    CYBERFI_ROLE_QA_BATCH_SIZE: "8",
-                    CYBERFI_ROLE_QA_LIMIT: "490",
-                },
-                log: join(evidence, "native-role-harness.log"),
-            });
-        } finally {
-            if (await lstat(roleReport).catch(() => undefined)) await cp(roleReport, join(evidence, "native-role-read-qa-report.json"));
+        let roleProof;
+        if (!uiOnly) {
+            const roleHarness = join(publicContext, "cyberfi-released-role-qa.mts");
+            const roleReport = join(publicContext, "cyberfi-released-role-qa-report.json");
+            await absent(roleHarness);
+            await cp(join(dirname(fileURLToPath(import.meta.url)), "released-role-harness.mts"), roleHarness);
+            try {
+                await command(process.execPath, ["--import", "tsx", roleHarness], {
+                    cwd: upstream,
+                    env: {
+                        ...env,
+                        HAPPY_DESKTOP_AGENT_EXECUTABLE: engine,
+                        CYBERFI_RELEASED_RESOURCES: resources,
+                        CYBERFI_ROLE_QA_BINARY_SHA256: await hashFile(engine),
+                        CYBERFI_ROLE_QA_REPORT: roleReport,
+                        CYBERFI_ROLE_QA_BATCH_SIZE: "8",
+                        CYBERFI_ROLE_QA_LIMIT: "490",
+                    },
+                    log: join(evidence, "native-role-harness.log"),
+                });
+            } finally {
+                if (await lstat(roleReport).catch(() => undefined)) await cp(roleReport, join(evidence, "native-role-read-qa-report.json"));
+            }
+            roleProof = JSON.parse(await readFile(roleReport, "utf8"));
+            assert(roleProof.success === true && roleProof.exactReadCount === 490 && roleProof.childExact === true, "Native role-body and read-only child checks failed");
         }
-        const roleProof = JSON.parse(await readFile(roleReport, "utf8"));
-        assert(roleProof.success === true && roleProof.exactReadCount === 490 && roleProof.childExact === true, "Native role-body and read-only child checks failed");
         const harness = join(publicContext, "cyberfi-115-integrated-qa.mts");
         await absent(harness);
         await cp(join(dirname(fileURLToPath(import.meta.url)), "released-ui-harness.mts"), harness);
@@ -481,8 +489,9 @@ async function main() {
                     success: true,
                     platform: "darwin",
                     arch,
-                    packagedBoot: smoke,
-                    nativeRoleAccess: { exactRoleBodies: roleProof.exactReadCount, realReadOnlyChild: roleProof.childExact, binarySha256: roleProof.binarySha256 },
+                    acceptanceScope: uiOnly ? "ui-only-followup" : "full",
+                    packagedBoot: smoke ?? { tested: false, priorFullRunProofRequired: true },
+                    nativeRoleAccess: roleProof ? { exactRoleBodies: roleProof.exactReadCount, realReadOnlyChild: roleProof.childExact, binarySha256: roleProof.binarySha256 } : { tested: false, priorFullRunProofRequired: true },
                     compiledArtifactUi: {
                         checks: report.checks,
                         stockElectronVersion: ELECTRON_VERSION,

@@ -46,7 +46,6 @@ async function pdfLoadObserve(page: any, selector: string): Promise<() => Promis
     return async () => {
         try {
             await page.waitForFunction((key: string) => (window as any).__cyberfiQaPdfLoads?.[key]?.loaded === true, key, { timeout: 20000 });
-            await nodeDelay(3000);
         } finally {
             await page.evaluate((key: string) => {
                 const observations = (window as any).__cyberfiQaPdfLoads;
@@ -55,6 +54,43 @@ async function pdfLoadObserve(page: any, selector: string): Promise<() => Promis
             }, key).catch(() => {});
         }
     };
+}
+async function pdfFixturePaintWait(app: any, frame: any, label: string): Promise<any> {
+    const bounds = await frame.boundingBox();
+    assert.ok(bounds && bounds.width > 0 && bounds.height > 0, "PDF iframe has visible bounds");
+    const result = await app.evaluate(async ({ BrowserWindow }: any, bounds: any) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        const [width, height] = window.getContentSize();
+        const crop = {x: Math.floor(bounds.x), y: Math.floor(bounds.y), width: Math.ceil(bounds.width), height: Math.ceil(bounds.height)};
+        if (crop.x < 0 || crop.y < 0 || crop.x + crop.width > width || crop.y + crop.height > height) throw Error("PDF crop must stay inside its visible iframe/window bounds");
+        const measure = (bytes: Uint8Array) => {
+            let teal = 0, white = 0;
+            for (let i = 0; i + 3 < bytes.length; i += 4) {
+                const blue = bytes[i]!, green = bytes[i+1]!, red = bytes[i+2]!, alpha = bytes[i+3]!;
+                if (alpha > 220 && green > red + 8 && blue > red + 8 && green >= blue && red > 100) teal++;
+                if (alpha > 220 && red > 245 && green > 245 && blue > 245) white++;
+            }
+            return {tealPixels: teal, whitePixels: white, painted: teal >= 100 && white >= 100};
+        };
+        const gray = new Uint8Array(512 * 4), paper = new Uint8Array(512 * 4), fixture = new Uint8Array(512 * 4);
+        for (let i=0;i<512;i++) { gray.set([128,128,128,255],i*4); paper.set([255,255,255,255],i*4); fixture.set(i<256?[224,236,194,255]:[255,255,255,255],i*4); }
+        const selfChecks = {grayRejected:!measure(gray).painted, whiteOnlyRejected:!measure(paper).painted, fixtureAccepted:measure(fixture).painted};
+        const started = Date.now();
+        let attempts = 0, image: any, metrics: any;
+        do {
+            image = await window.webContents.capturePage(crop, {stayHidden:true}); attempts++;
+            metrics = measure(image.toBitmap());
+            if (metrics.painted) break;
+            await new Promise(resolve => setTimeout(resolve, 500));
+        } while (Date.now() - started < 20000);
+        return {bounds:crop, elapsedMs:Date.now()-started, attempts, ...metrics, selfChecks, png:image.toPNG().toString("base64")};
+    }, bounds);
+    await writeFile(resolve(`.context/cyberfi-115-integrated-${label}-crop.png`), Buffer.from(result.png,"base64"));
+    delete result.png;
+    (report.pdfPaintChecks ??= []).push({label,...result});
+    assert.deepEqual(result.selfChecks, {grayRejected:true, whiteOnlyRejected:true, fixtureAccepted:true});
+    assert.equal(result.painted,true,"Known fixture teal triangle and white paper must paint inside the PDF iframe within20seconds");
+    return result;
 }
 async function pdfDiagnostics(app: any, stage: string): Promise<void> {
     const pages = app.context().pages();
@@ -265,10 +301,8 @@ try {
     const page = await app.firstWindow();
     page.on("response", (response: any) => {
         if (response.status() >= 400) {
-            (report.failedResources ??= []).push({
-                url: response.url(),
-                status: response.status(),
-            });
+            const ledger = (report.failedResources ??= []);
+            if (ledger.length < 100) ledger.push({pathname: new URL(response.url()).pathname, status: response.status()});
         }
     });
     page.on("pageerror", (e: any) => report.errors.push(e.message));
@@ -579,6 +613,23 @@ try {
             );
             return true;
         });
+    await run("sidebar reaches complete490roles and300skills from actual UI", async () => {
+        const started = Date.now();
+        const readCounts = async () => page.evaluate(() => {
+            const read = (id: string) => {
+                const row = document.querySelector(`[data-happy-desktop-ui="sidebar-item"][data-item-id="${id}"]`);
+                return {label: row?.textContent ?? "", count: Number(row?.querySelector('[data-happy-desktop-ui="count-badge-label"]')?.textContent ?? "0")};
+            };
+            return {agents: read("agents"), skills: read("skills")};
+        });
+        const initial = await readCounts();
+        let final = initial;
+        while ((final.agents.count !== 490 || final.skills.count !== 300) && Date.now()-started < 120000) { await nodeDelay(1000); final = await readCounts(); }
+        report.catalogUiReadiness = {initial, final, elapsedMs:Date.now()-started};
+        assert.ok(final.agents.label.includes("Ajanlar") && final.skills.label.includes("Beceriler"));
+        assert.equal(final.agents.count,490); assert.equal(final.skills.count,300);
+        return report.catalogUiReadiness;
+    });
     await run("chat PDF opens in right preview while main chat remains usable", async () => {
         const waitPdf = await pdfLoadObserve(page, '[data-happy-desktop-ui="file-preview-document"][title="qa-support.pdf"]');
         await page.getByRole("button", { name: "qa-support.pdf dosyasını aç", exact: true }).click();
@@ -593,6 +644,7 @@ try {
             frameSource = await frame.getAttribute("src");
             assert.ok(frameSource);
             await waitPdf();
+            await pdfFixturePaintWait(app, frame, "chat-pdf-right");
         } else {
             await page.getByRole("button", { name: "İndir", exact: true }).first().waitFor();
         }
@@ -693,6 +745,7 @@ try {
         assert.equal(bytes.length, expectedPdf.size);
         assert.equal(sha256, expectedPdf.sha256);
         await waitGlobalPdf();
+        await pdfFixturePaintWait(app, pdf, "output-pdf");
         const pdfEvidence = { loaded: true, readSucceeded: true, transport: "authorized-native-SDK", artifactId: artifact.id, signature, bytes: bytes.length, sha256 };
         await pdfDiagnostics(app, "global-pdf-original-load");
         await captureOutput("pdf");

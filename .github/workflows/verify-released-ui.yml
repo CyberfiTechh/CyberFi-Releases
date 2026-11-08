@@ -3,6 +3,10 @@ run-name: Released macOS UI ${{ inputs.architecture }} asset ${{ inputs.desktop_
 on:
     workflow_dispatch:
         inputs:
+            ui_only:
+                type: boolean
+                default: false
+                required: false
             desktop_version:
                 type: choice
                 options: ["0.0.117", "0.0.116"]
@@ -44,6 +48,7 @@ jobs:
         timeout-minutes: 40
         env:
             ARCH: ${{ inputs.architecture }}
+            UI_ONLY: ${{ inputs.ui_only && 'true' || 'false' }}
             DESKTOP_VERSION: ${{ inputs.desktop_version }}
             DESKTOP_RELEASE_ID: ${{ inputs.desktop_release_id }}
             DESKTOP_ASSET_ID: ${{ inputs.desktop_asset_id }}
