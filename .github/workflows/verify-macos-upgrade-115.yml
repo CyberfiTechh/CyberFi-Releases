@@ -1,0 +1,74 @@
+name: Verify released CyberFi macOS 114 to 115 upgrade
+run-name: Verify macOS ${{ inputs.architecture }} 0.0.114 to 0.0.115
+
+on:
+    workflow_dispatch:
+        inputs:
+            architecture:
+                type: choice
+                options: [x64, arm64]
+                required: true
+
+permissions:
+    contents: read
+
+jobs:
+    installed:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        runs-on: ${{ inputs.architecture == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+        timeout-minutes: 30
+        env:
+            ARCH: ${{ inputs.architecture }}
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: acceptance
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  package_json_file: upstream/package.json
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Install public upstream hidden launcher
+              working-directory: upstream
+              run: pnpm install --frozen-lockfile --ignore-scripts
+            - name: Download the published native DMGs
+              run: |
+                  set -euo pipefail
+                  case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
+                  test "$(uname -m)" = "$native"
+                  downloads="$RUNNER_TEMP/cyberfi-upgrade-downloads"
+                  mkdir "$downloads"
+                  root="$HOME/CyberFi-upgrade-115-$ARCH-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+                  test ! -e "$root"
+                  echo "ACCEPTANCE_ROOT=$root" >> "$GITHUB_ENV"
+                  echo "DMG_ROOT=$downloads" >> "$GITHUB_ENV"
+                  for version in 0.0.114 0.0.115; do
+                    curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
+                      "https://github.com/CyberfiTechh/CyberFi-Releases/releases/download/macos-v$version/CyberFi-$version-$ARCH.dmg" \
+                      --output "$downloads/CyberFi-$version-$ARCH.dmg"
+                  done
+            - name: Verify manual replacement, retained profile and fresh 115 launch
+              working-directory: upstream
+              run: |
+                  set -euo pipefail
+                  unset GH_TOKEN GITHUB_TOKEN NODE_OPTIONS ELECTRON_RUN_AS_NODE
+                  node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-macos-upgrade-115.mjs" \
+                    "$PWD" "$ACCEPTANCE_ROOT" "$DMG_ROOT/CyberFi-0.0.114-$ARCH.dmg" "$DMG_ROOT/CyberFi-0.0.115-$ARCH.dmg"
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberFi-macOS-${{ inputs.architecture }}-114-to-115
+                  path: |
+                      ${{ env.ACCEPTANCE_ROOT }}/install-upgrade-report.json
+                      ${{ env.ACCEPTANCE_ROOT }}/smoke-*.json
+                      ${{ env.ACCEPTANCE_ROOT }}/welcome-*.png
+                  retention-days: 7
