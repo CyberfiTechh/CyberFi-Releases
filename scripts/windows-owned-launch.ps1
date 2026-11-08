@@ -6,6 +6,7 @@ $report = [ordered]@{
     success = $false
     stage = 'hosted-runner-guard'
     nativeError = $null
+    failureType = $null
     localAccountsError = $null
     accountCleanupError = $null
     fixtureSidVerified = $false
@@ -38,6 +39,17 @@ function Get-LocalAccountsFailure([Management.Automation.ErrorRecord]$Record) {
     }
 }
 
+function ConvertTo-NativeEnvironment([Collections.IDictionary]$Values) {
+    $strings = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $Values.GetEnumerator()) {
+        if ($entry.Key -isnot [string] -or $entry.Value -isnot [string]) {
+            throw [ArgumentException]::new('The fixture environment requires string names and values.')
+        }
+        $strings.Add([string]$entry.Key, [string]$entry.Value)
+    }
+    return ,$strings
+}
+
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -58,7 +70,6 @@ try {
     $report.stage = 'compile-native-preflight'
     Add-Type -TypeDefinition @'
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -127,11 +138,11 @@ public static class CyberFiStandardLaunch {
                 throw new InvalidOperationException("medium-integrity-required");
         } finally { Marshal.FreeHGlobal(integrity); }
     }
-    static IntPtr EnvironmentBlock(IDictionary values) {
+    static IntPtr EnvironmentBlock(IDictionary<string, string> values) {
         var sorted = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (DictionaryEntry entry in values) {
-            string name = (string)entry.Key, value = (string)entry.Value;
-            if (String.IsNullOrEmpty(name) || name.IndexOfAny(new char[] { '=', '\0' }) >= 0 || value.IndexOf('\0') >= 0)
+        foreach (var entry in values) {
+            string name = entry.Key, value = entry.Value;
+            if (String.IsNullOrEmpty(name) || name.IndexOfAny(new char[] { '=', '\0' }) >= 0 || value == null || value.IndexOf('\0') >= 0)
                 throw new InvalidOperationException("invalid-fixture-environment");
             sorted.Add(name, value);
         }
@@ -139,9 +150,11 @@ public static class CyberFiStandardLaunch {
         foreach (var entry in sorted) block.Append(entry.Key).Append('=').Append(entry.Value).Append('\0');
         return Marshal.StringToHGlobalUni(block.Append('\0').ToString());
     }
-    public static uint Run(string user, SecureString password, string sid, string executable, string script, string cwd, IDictionary values) {
+    public static uint Run(string user, SecureString password, string sid, string executable, string script, string cwd, IDictionary<string, string> values) {
+        Stage = "validate-fixed-probe-paths";
         if (executable.IndexOf('"') >= 0 || script.IndexOf('"') >= 0)
             throw new InvalidOperationException("invalid-fixed-probe-path");
+        Stage = "build-fixed-probe-command";
         var command = new StringBuilder("\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -File \"" + script + "\"");
         if (command.Length >= 1024) throw new InvalidOperationException("probe-command-too-long");
         var startup = new StartupInfo { size = Marshal.SizeOf(typeof(StartupInfo)), flags = 1, show = 0 };
@@ -149,10 +162,12 @@ public static class CyberFiStandardLaunch {
         IntPtr token = IntPtr.Zero, environment = IntPtr.Zero;
         bool exited = false;
         try {
+            Stage = "allocate-unicode-environment";
             environment = EnvironmentBlock(values);
-            Stage = "create-suspended-standard-user-probe";
+            Stage = "allocate-native-credential";
             IntPtr nativePassword = Marshal.SecureStringToGlobalAllocUnicode(password);
             try {
+                Stage = "create-suspended-standard-user-probe";
                 // The hosted runner experiment succeeded with logon flags zero and an unnamed desktop.
                 const uint flags = 4 | 0x400 | 0x08000000; // Suspended, Unicode environment, no console window.
                 Check(CreateProcessWithLogonW(user, ".", nativePassword, 0, executable, command, flags,
@@ -252,8 +267,10 @@ exit 23
         CYBERFI_OWNED_LAUNCH_PROBE = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('VMO8cmvDp2UgZGXEn2VyaTsgJVBBVEglICYgImFsxLFudMSxIgp5ZW5pIHNhdMSxcg=='))
     }
 
+    $report.stage = 'normalize-probe-environment'
+    $nativeEnvironment = ConvertTo-NativeEnvironment $environment
     $report.stage = 'native-launch'
-    $report.childExitCode = [CyberFiStandardLaunch]::Run($account.Name, $password, $accountSid.Value, $nativePowerShell, $probe, $fixture.FullName, $environment)
+    $report.childExitCode = [CyberFiStandardLaunch]::Run($account.Name, $password, $accountSid.Value, $nativePowerShell, $probe, $fixture.FullName, $nativeEnvironment)
     $report.fixtureSidVerified = $true
     $report.elevated = $false
     $report.administrator = $false
@@ -270,11 +287,15 @@ exit 23
     $report.exitCodePropagated = $report.childExitCode -eq 23
     $report.success = $report.environmentPreserved -and $report.exitCodePropagated -and $result.sidMatches -eq $true
 } catch {
-    if ($report.stage -eq 'native-launch') { $report.stage = [CyberFiStandardLaunch]::Stage }
+    if ($report.stage -eq 'native-launch' -and [CyberFiStandardLaunch]::Stage -ne 'initialize') { $report.stage = [CyberFiStandardLaunch]::Stage }
     if ($report.stage -in @('check-owned-account-name', 'create-owned-standard-user', 'read-standard-users-membership', 'add-standard-users-membership')) {
         $report.localAccountsError = Get-LocalAccountsFailure $_
     }
     for ($cause = $_.Exception; $null -ne $cause; $cause = $cause.InnerException) {
+        $type = $cause.GetType().Name
+        if ($type -cin @('ArgumentException', 'ArgumentNullException', 'InvalidCastException', 'InvalidOperationException', 'MethodException', 'MethodInvocationException', 'OutOfMemoryException', 'OverflowException', 'ParameterBindingException', 'ParameterBindingValidationException', 'Win32Exception')) {
+            $report.failureType = $type
+        }
         if ($cause -is [ComponentModel.Win32Exception]) { $report.nativeError = $cause.NativeErrorCode; break }
     }
 } finally {
