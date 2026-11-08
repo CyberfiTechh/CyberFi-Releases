@@ -62,6 +62,10 @@ function watcherReady(child) {
         child.stderr.on("data", data); child.once("error", failed); child.once("close", closed);
     });
 }
+function missingOwnedKeychainDefaultConfirmed(defaults, list, reads) {
+    const failed = reads.filter(read => !read.success);
+    return defaults.length === 0 && list.length === 0 && failed.length === 1 && failed[0].context === "owned-home" && failed[0].verb === "default-keychain" && failed[0].exitCode === 1 && /A default keychain could not be found/iu.test(failed[0].diagnostic);
+}
 
 async function main() {
     const target = process.env.TARGET;
@@ -248,7 +252,10 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
         stage = "owned engine archive download";
         await download("CyberfiTechh/CyberFi-Engine", engineAsset, archive); assert.equal(await hashFile(archive), engineSha);
-        const tar = windows ? "tar.exe" : "/usr/bin/tar";
+        // Git Bash's GNU tar can interpret a Windows drive prefix as a remote
+        // archive. Select the OS-native extractor explicitly on both platforms.
+        const tar = windows ? join(environmentValue(safeEnv, "SystemRoot"), "System32/tar.exe") : "/usr/bin/tar";
+        report.engineArchiveExtractor = windows ? "Windows System32 tar" : "/usr/bin/tar";
         stage = "owned engine archive extraction";
         assert.equal(await command(tar, ["-tzf", archive]), engineName); await command(tar, ["-xzf", archive, "-C", engineRoot]);
         const engine = join(engineRoot, engineName); process.env.HAPPY_DESKTOP_AGENT_EXECUTABLE = engine;
@@ -288,26 +295,38 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
                 }
             };
             const actualDefault = keychains(await securityRead("default-keychain", safeEnv, "runner-home"));
+            const actualList = keychains(await securityRead("list-keychains", safeEnv, "runner-home"));
             const originalDefault = keychains(await securityRead("default-keychain", engineEnv, "owned-home"));
             const originalList = keychains(await securityRead("list-keychains", engineEnv, "owned-home"));
-            Object.assign(report.keychainPreflight, { runnerDefault: actualDefault[0], ownedHomeDefault: originalDefault[0], searchListCount: originalList.length });
-            if (keychainReadError) throw keychainReadError;
-            assert(originalDefault.length === 1 && actualDefault.length === 1 && originalList.length <= 20, "Native user keychain baseline missing");
+            const missingOwnedDefault = missingOwnedKeychainDefaultConfirmed(originalDefault, originalList, report.keychainPreflight.reads);
+            Object.assign(report.keychainPreflight, { runnerDefault: actualDefault[0], ownedHomeDefault: originalDefault[0], searchListCount: originalList.length, runnerSearchListCount: actualList.length, ownedDefaultInitiallyMissing: missingOwnedDefault });
+            if (keychainReadError && !missingOwnedDefault) throw keychainReadError;
+            assert((originalDefault.length === 1 || missingOwnedDefault) && actualDefault.length === 1 && originalList.length <= 20 && actualList.length <= 20, "Native user keychain baseline missing");
+            assert.notEqual(await realpath(engineEnv.HOME), await realpath(safeEnv.HOME), "Keychain calibration must use an isolated owned home");
             const keychain = join(root, "owned-login.keychain-db"), keychainPassword = randomBytes(32).toString("hex");
-            report.keychainPreflight.defaultMetadataReadable = await security(["show-keychain-info", originalDefault[0]], engineEnv).then(() => true, () => false);
+            report.keychainPreflight.defaultMetadataReadable = originalDefault.length === 1 ? await security(["show-keychain-info", originalDefault[0]], engineEnv).then(() => true, () => false) : false;
             keychainCleanup = async () => {
-                await security(["default-keychain", "-d", "user", "-s", originalDefault[0]], engineEnv);
+                // Apple's keychain_default CLI passes NULL to SecKeychainSetDomainDefault
+                // when -s has no path, restoring this run's initially absent default.
+                await security(["default-keychain", "-d", "user", "-s", ...originalDefault], engineEnv);
                 await security(["list-keychains", "-d", "user", "-s", ...originalList], engineEnv);
                 assert(keychain.startsWith(root + sep));
                 await security(["delete-keychain", keychain], engineEnv);
-                assert.deepEqual(keychains(await security(["default-keychain", "-d", "user"], engineEnv)), originalDefault);
+                if (missingOwnedDefault) {
+                    const absent = await security(["default-keychain", "-d", "user"], engineEnv).then(() => false, error => error.code === 1 && /A default keychain could not be found/iu.test(error.stderr ?? ""));
+                    assert(absent, "Initially missing owned default keychain was not restored");
+                } else assert.deepEqual(keychains(await security(["default-keychain", "-d", "user"], engineEnv)), originalDefault);
                 assert.deepEqual(keychains(await security(["list-keychains", "-d", "user"], engineEnv)), originalList);
+                assert.deepEqual(keychains(await security(["default-keychain", "-d", "user"], safeEnv)), actualDefault);
+                assert.deepEqual(keychains(await security(["list-keychains", "-d", "user"], safeEnv)), actualList);
             };
             await security(["create-keychain", "-p", keychainPassword, keychain], engineEnv);
             await security(["set-keychain-settings", "-lut", "21600", keychain], engineEnv);
             await security(["unlock-keychain", "-p", keychainPassword, keychain], engineEnv);
-            await security(["list-keychains", "-d", "user", "-s", keychain, ...originalList], engineEnv);
+            await security(["list-keychains", "-d", "user", "-s", keychain], engineEnv);
             await security(["default-keychain", "-d", "user", "-s", keychain], engineEnv);
+            assert.deepEqual(keychains(await security(["default-keychain", "-d", "user"], safeEnv)), actualDefault);
+            assert.deepEqual(keychains(await security(["list-keychains", "-d", "user"], safeEnv)), actualList);
             report.keychainCalibration = { ownedDisposableUnlockedDefault: true, cryptoMocked: false, electronItemPreseeded: false, trustStoreModified: false };
         }
         stage = "owned engine fixture";
@@ -517,6 +536,10 @@ if (process.argv.includes("--self-test")) {
     const readiness = watcherReady(child);
     child.stderr.emit("data", Buffer.from("#< CLIXML\n")); child.stderr.emit("data", Buffer.from("rea")); child.stderr.emit("data", Buffer.from("dy\n"));
     await readiness; assert.equal(child.stderr.listenerCount("data"), 0);
+    const missing = { success: false, context: "owned-home", verb: "default-keychain", exitCode: 1, diagnostic: "security: SecKeychainCopyDomainDefault user: A default keychain could not be found." };
+    assert.equal(missingOwnedKeychainDefaultConfirmed([], [], [missing]), true);
+    for (const reads of [[{ ...missing, context: "runner-home" }], [{ ...missing, exitCode: 44 }], [{ ...missing, diagnostic: "Permission denied" }], [missing, missing]]) assert.equal(missingOwnedKeychainDefaultConfirmed([], [], reads), false);
+    assert.equal(missingOwnedKeychainDefaultConfirmed([], ["/existing"], [missing]), false);
     assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.125-x64.exe", pin.sha256, 10));
     console.log("Strict artifact pins, redirect refusal, independent RSA refusal and credential environment isolation passed. No app or network used.");
 } else await main();
