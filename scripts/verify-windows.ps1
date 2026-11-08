@@ -31,9 +31,14 @@ function Get-UpgradeSource([string]$Target) {
         default { throw 'Unsupported upgrade target' }
     }
 }
-function Receive-PublishedAsset([string]$Url, [string]$Destination) {
+function Receive-PublishedAsset([string]$Url, [string]$Destination, [long]$AssetId, [ValidateSet("CyberFi-Releases", "CyberFi-Engine")][string]$Repository = "CyberFi-Releases") {
+    Assert-True ($AssetId -gt 0) 'A published numeric asset identity is required'
     Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloading $([IO.Path]::GetFileName($Destination))"
     & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 300 --output $Destination $Url
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Primary GitHub download failed; trying the same pinned asset through the official public API ($AssetId)."
+        & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 300 --header 'Accept: application/octet-stream' --output $Destination "https://api.github.com/repos/CyberfiTechh/$Repository/releases/assets/$AssetId"
+    }
     Assert-True ($LASTEXITCODE -eq 0) "Bounded release download failed: $([IO.Path]::GetFileName($Destination)) (curl exit $LASTEXITCODE)"
     Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloaded $((Get-Item -LiteralPath $Destination).Length) bytes"
 }
@@ -185,13 +190,13 @@ foreach ($version in $versions) {
     Assert-True ($asset.Count -eq 1 -and $asset[0].state -eq 'uploaded' -and
         $asset[0].digest -ceq "sha256:$($expected[$version])") 'Immutable installer asset mismatch'
     $path = Join-Path $root $name
-    Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name" $path
+    Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name" $path $asset[0].id
     Assert-True ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $expected[$version]) 'Downloaded installer digest mismatch'
     foreach ($suffix in @('.sha256', '.update.json')) {
         $metadata = @($release.assets | Where-Object { $_.name -ceq "$name$suffix" })
         Assert-True ($metadata.Count -eq 1 -and $metadata[0].state -eq 'uploaded') 'Missing release verification asset'
         $sidecar = "$path$suffix"
-        Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name$suffix" $sidecar
+        Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name$suffix" $sidecar $metadata[0].id
         Assert-True ("sha256:$((Get-FileHash $sidecar -Algorithm SHA256).Hash.ToLowerInvariant())" -ceq $metadata[0].digest) 'Verification asset digest mismatch'
     }
     Assert-True ((Get-Content "$path.sha256" -Raw).Split()[0] -ceq $expected[$version]) 'Published SHA256 sidecar mismatch'
@@ -285,7 +290,7 @@ if ($InApp117) {
     $engineRoot = Assert-Owned (Join-Path $root 'owned-engine') $root
     New-Item -ItemType Directory -Path $engineRoot | Out-Null
     $archive = Join-Path $engineRoot 'engine.tar.gz'
-    Receive-PublishedAsset 'https://github.com/CyberfiTechh/CyberFi-Engine/releases/download/v0.4.117-preview.1/happy-agent-0.4.117-preview.1-win32-x64.tar.gz' $archive
+    Receive-PublishedAsset 'https://github.com/CyberfiTechh/CyberFi-Engine/releases/download/v0.4.117-preview.1/happy-agent-0.4.117-preview.1-win32-x64.tar.gz' $archive 722471506 'CyberFi-Engine'
     Assert-True ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ceq '2b0de452512defd491b5fc8e0b8df1c9dd77618ed164fbfbc7a0b37a9bef3a87') 'Published owned engine fixture digest mismatch'
     $members = @(& tar -tzf $archive)
     Assert-True ($LASTEXITCODE -eq 0 -and $members.Count -eq 1 -and $members[0] -ceq 'happy-agent-win32-x64.exe') 'Unexpected owned engine archive members'
