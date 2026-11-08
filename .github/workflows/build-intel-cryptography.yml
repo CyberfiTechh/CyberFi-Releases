@@ -1,0 +1,154 @@
+name: Build pinned Intel macOS cryptography wheel
+run-name: Build cryptography 50.0.2 with static OpenSSL 4.0.3 for Intel macOS
+
+on:
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+jobs:
+    wheel:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        runs-on: macos-15-intel
+        timeout-minutes: 45
+        env:
+            TAG: mcp-cryptography-50.0.2-macos-x64-r1
+            MACOSX_DEPLOYMENT_TARGET: "11.0"
+            PIP_CONFIG_FILE: /dev/null
+            PIP_INDEX_URL: https://pypi.org/simple
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+              with:
+                  python-version: "3.11"
+            - name: Verify official source archives and hosted native toolchain
+              run: |
+                  set -euo pipefail
+                  test "$(uname -m)" = x86_64
+                  work="$RUNNER_TEMP/crypto-wheel-build"
+                  proof="$RUNNER_TEMP/crypto-wheel-proof"
+                  mkdir "$work" "$proof"
+                  echo "WORK=$work" >> "$GITHUB_ENV"
+                  echo "PROOF=$proof" >> "$GITHUB_ENV"
+                  rustc --version | tee "$proof/rustc.txt"
+                  cargo --version | tee "$proof/cargo.txt"
+                  clang --version > "$proof/clang.txt"
+                  xcrun --show-sdk-version > "$proof/sdk.txt"
+                  python --version > "$proof/build-python.txt"
+                  curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
+                    'https://files.pythonhosted.org/packages/9d/af/182eb91b0df3fe75c4d9f26fe70684569566745f6ba7e5c9c73a862c5252/cryptography-50.0.2.tar.gz' \
+                    --output "$work/cryptography-50.0.2.tar.gz"
+                  curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
+                    'https://github.com/openssl/openssl/releases/download/openssl-4.0.3/openssl-4.0.3.tar.gz' \
+                    --output "$work/openssl-4.0.3.tar.gz"
+                  printf '%s  %s\n' '7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5' "$work/cryptography-50.0.2.tar.gz" | shasum -a 256 -c -
+                  printf '%s  %s\n' '325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9' "$work/openssl-4.0.3.tar.gz" | shasum -a 256 -c -
+                  tar -xf "$work/cryptography-50.0.2.tar.gz" -C "$work"
+                  tar -xf "$work/openssl-4.0.3.tar.gz" -C "$work"
+                  python -m venv "$work/build-venv"
+                  "$work/build-venv/bin/python" -m pip install --report "$proof/build-dependencies.json" \
+                    'pip==26.3' 'maturin==1.16.0' 'cffi==2.1.1' 'pycparser==3.12' \
+                    'setuptools==84.2.1' 'wheel==0.48.0' 'packaging==26.3'
+                  "$work/build-venv/bin/python" -m pip freeze --all > "$proof/build-dependencies.txt"
+            - name: Build private static OpenSSL without changing host tools
+              run: |
+                  set -euo pipefail
+                  cd "$WORK/openssl-4.0.3"
+                  ./Configure darwin64-x86_64-cc no-shared no-tests no-ssl2 no-ssl3 -fPIC \
+                    --prefix="$WORK/openssl-static" --libdir=lib
+                  make -j"$(sysctl -n hw.ncpu)"
+                  make install_sw
+                  "$WORK/openssl-static/bin/openssl" version > "$PROOF/openssl.txt"
+            - name: Build unchanged cryptography code and include upstream licenses
+              run: |
+                  set -euo pipefail
+                  cp "$WORK/openssl-4.0.3/LICENSE.txt" "$WORK/cryptography-50.0.2/LICENSE.OPENSSL"
+                  python - <<'PY'
+                  import os, pathlib
+                  p=pathlib.Path(os.environ['WORK'])/'cryptography-50.0.2/pyproject.toml'
+                  text=p.read_text()
+                  before='license-files = [ "LICENSE", "LICENSE.APACHE", "LICENSE.BSD" ]'
+                  assert text.count(before)==1
+                  p.write_text(text.replace(before,'license-files = [ "LICENSE", "LICENSE.APACHE", "LICENSE.BSD", "LICENSE.OPENSSL" ]'))
+                  PY
+                  mkdir "$PROOF/wheels"
+                  OPENSSL_DIR="$WORK/openssl-static" OPENSSL_STATIC=1 OPENSSL_NO_VENDOR=1 \
+                    "$WORK/build-venv/bin/python" -m pip wheel --no-build-isolation --no-deps --no-cache-dir \
+                    --wheel-dir "$PROOF/wheels" "$WORK/cryptography-50.0.2"
+                  python - <<'PY'
+                  import os,pathlib
+                  wheels=list((pathlib.Path(os.environ['PROOF'])/'wheels').glob('cryptography-50.0.2-*x86_64.whl'))
+                  assert len(wheels)==1
+                  assert '-cp311-abi3-' in wheels[0].name
+                  with open(os.environ['GITHUB_ENV'],'a')as f:f.write('WHEEL='+str(wheels[0])+'\n')
+                  PY
+            - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+              with:
+                  python-version: "3.12"
+            - name: Native isolated wheel checks without Rust or external OpenSSL
+              run: |
+                  set -euo pipefail
+                  python -m venv "$WORK/smoke-venv"
+                  "$WORK/smoke-venv/bin/python" -m pip install --only-binary=:all: --report "$PROOF/smoke-dependencies.json" \
+                    "$WHEEL" 'PyJWT==2.15.1' 'cffi==2.1.1' 'pycparser==3.12'
+                  mkdir "$WORK/fresh-home"
+                  HOME="$WORK/fresh-home" CARGO_HOME="$WORK/fresh-home/.cargo" RUSTUP_HOME="$WORK/fresh-home/.rustup" \
+                    PATH="$WORK/smoke-venv/bin:/usr/bin:/bin" "$WORK/smoke-venv/bin/python" - <<'PY'
+                  import hashlib,json,os,pathlib,platform,subprocess,sys,zipfile
+                  import cryptography,jwt
+                  from cryptography.fernet import Fernet
+                  from cryptography.hazmat.backends.openssl.backend import backend
+                  from cryptography.hazmat.primitives import hashes
+                  from cryptography.hazmat.primitives.asymmetric import rsa,padding
+                  assert platform.machine()=='x86_64' and cryptography.__version__=='50.0.2'
+                  assert backend.openssl_version_text().startswith('OpenSSL 4.0.3 ')
+                  key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+                  signature=key.sign(b'CyberFi native wheel acceptance',padding.PKCS1v15(),hashes.SHA256())
+                  key.public_key().verify(signature,b'CyberFi native wheel acceptance',padding.PKCS1v15(),hashes.SHA256())
+                  token=jwt.encode({'aud':'owned-fixture'},key,algorithm='RS256')
+                  assert jwt.decode(token,key.public_key(),algorithms=['RS256'],audience='owned-fixture')['aud']=='owned-fixture'
+                  f=Fernet(Fernet.generate_key());assert f.decrypt(f.encrypt(b'fixture'))==b'fixture'
+                  extension=next(pathlib.Path(cryptography.__file__).parent.rglob('_rust*.so'))
+                  links=subprocess.check_output(['/usr/bin/otool','-L',str(extension)],text=True)
+                  assert 'libcrypto' not in links and 'libssl' not in links and '/opt/homebrew' not in links and '/usr/local/opt/' not in links
+                  subprocess.run(['/usr/bin/lipo',str(extension),'-verify_arch','x86_64'],check=True)
+                  proof=pathlib.Path(os.environ['PROOF']);wheel=pathlib.Path(os.environ['WHEEL'])
+                  with zipfile.ZipFile(wheel)as z:assert any(n.endswith('/LICENSE.OPENSSL')for n in z.namelist())
+                  result={'success':True,'cryptography':cryptography.__version__,'openssl':backend.openssl_version_text(),
+                    'smokePython':sys.version,'architecture':platform.machine(),'wheel':wheel.name,
+                    'wheelSHA256':hashlib.sha256(wheel.read_bytes()).hexdigest(),'dynamicLibraries':links,
+                    'rustRequiredAtRuntime':False,'rsaAndJwtAndFernetPassed':True,
+                    'sources':{'cryptography50.0.2':'7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5',
+                      'openssl4.0.3':'325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9'},
+                    'metadataOnlyPatch':'Include upstream OpenSSL license; cryptography source code unchanged',
+                    'workflowCommit':os.environ['GITHUB_SHA'],'run':'https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],
+                    'hostedToolchain':{n:(proof/(n+'.txt')).read_text()for n in ['rustc','cargo','clang','sdk','build-python','openssl']}}
+                  (proof/(wheel.name+'.sha256')).write_text(result['wheelSHA256']+'  '+wheel.name+'\n')
+                  (proof/'provenance.json').write_text(json.dumps(result,indent=2)+'\n')
+                  print(json.dumps(result,indent=2))
+                  PY
+            - name: Publish immutable dependency wheel and provenance
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                    echo 'Immutable wheel release already exists; refusing replacement.'
+                    exit 1
+                  fi
+                  printf '%s\n' 'Intel macOS dependency built from pinned official PyCA 50.0.2 and OpenSSL 4.0.3 sources.' \
+                    'Static OpenSSL; native Python 3.12 RSA/JWT/Fernet checks passed without Rust PATH.' \
+                    'Upstream licenses are inside the wheel; provenance records source hashes and hosted toolchain.' \
+                    > "$PROOF/release-notes.txt"
+                  gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+                    --title 'MCP dependency: cryptography 50.0.2 for Intel macOS' --notes-file "$PROOF/release-notes.txt" \
+                    "$WHEEL" "$PROOF/$(basename "$WHEEL").sha256" "$PROOF/provenance.json"
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: Intel-macOS-cryptography-50.0.2
+                  path: ${{ runner.temp }}/crypto-wheel-proof
+                  retention-days: 14
