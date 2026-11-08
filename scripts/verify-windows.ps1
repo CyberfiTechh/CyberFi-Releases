@@ -8,6 +8,7 @@ $expected = @{
     '0.0.115' = '5d6334d1d7f516cd13c893ffd7a18d1a6bb2511292ff6946c8ffb9c37608ea5a'
     '0.0.116' = '63b302d6974e233d317af0f14950acb8449b16e3be1f83df1ce9782e385e4dde'
     '0.0.117' = '25b07164a17e77516f9dcfc978f784510e47a2af86fdf3e7dfa539322bdaa1f4'
+    '0.0.118' = '5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381'
 }
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 if ($TargetVersion -eq '0.0.117') {
@@ -58,7 +59,8 @@ if ($SelfCheck) {
     Assert-True ((Get-UpgradeSource '0.0.119') -eq '0.0.118') '119 source must be118'
     Assert-True ((Get-UpgradeSource '0.0.120') -eq '0.0.118') '120 source must remain the published118;119 is an unpublished candidate'
 
-    Assert-True ($expected.Count -in @(5, 6)) 'Only immutable pinned versions allowed'
+    Assert-True ($expected.Count -in @(6, 7)) 'Only immutable pinned versions allowed'
+    Assert-True ($expected.ContainsKey((Get-UpgradeSource $TargetVersion))) 'Upgrade baseline must have an immutable installer digest'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
         Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118', '0.0.119', '0.0.120')) 'Unexpected version'
