@@ -15,4 +15,3 @@ CyberFi’ın herkese açık Windows ve macOS dağıtım deposu.
 - Windows deneme paketleri yerel test sertifikasıyla imzalanır. Windows güven uyarısı gösterebilir.
 
 CyberFi, MIT lisanslı [Happy Desktop](https://github.com/slopus/happy-desktop) projesini temel alır. [Özgün lisans ve telif bildirimi](LICENSE-Happy-Desktop.txt) kurulum paketinde de yer alır.
-
