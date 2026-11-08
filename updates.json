@@ -1,5 +1,27 @@
 [
   {
+    "tag_name": "macos-v0.0.117",
+    "draft": false,
+    "assets": [
+      {
+        "name": "CyberFi-0.0.117-arm64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "name": "CyberFi-0.0.117-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "name": "CyberFi-0.0.117-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "name": "CyberFi-0.0.117-x64.dmg.sha256",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "v0.0.117",
     "draft": false,
     "assets": [
