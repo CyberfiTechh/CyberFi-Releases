@@ -79,6 +79,7 @@ async function main() {
     const token = process.env.GH_TOKEN;
     const safeEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
         !/TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|NODE_OPTIONS|ELECTRON_RUN_AS_NODE|SMOKE_REPORT|SMOKE_SCREENSHOT|VITE_DEV_SERVER_URL|ACCEPTANCE_ARTIFACTS/iu.test(key)));
+    for (const key of Object.keys(process.env)) if (!Object.hasOwn(safeEnv, key)) delete process.env[key];
     const command = async (file, args, options = {}) => (await exec(file, args, { env: safeEnv, timeout: 120000, maxBuffer: 8 * 1024 ** 2, ...options })).stdout.trim();
     async function api(path) {
         assert.match(path, /^repos\/(CyberfiTechh\/(CyberFi-Releases|CyberFi-Engine))\/releases\/(tags\/[A-Za-z0-9.-]+|[1-9][0-9]*)$/u);
