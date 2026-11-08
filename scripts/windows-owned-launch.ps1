@@ -1,334 +1,291 @@
-param(
-    [string]$Executable,
-    [string]$Profile,
-    [switch]$SelfTest
-)
+param([switch]$SelfTest)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$selfTestDiagnostic = $null
 
-# Test launcher only: a linked token can lower this same user's privileges, never raise them.
-Add-Type -TypeDefinition @'
+$report = [ordered]@{
+    success = $false
+    stage = 'hosted-runner-guard'
+    nativeError = $null
+    fixtureSidVerified = $false
+    elevated = $null
+    administrator = $null
+    mediumIntegrity = $null
+    environmentPreserved = $false
+    exitCodePropagated = $false
+    guiLaunched = $false
+    accountRemoved = $false
+    fixtureRemoved = $false
+}
+$fixture = $null
+$account = $null
+$accountAttempted = $false
+$password = $null
+
+try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if (-not $SelfTest -or $env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+        $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'CyberfiTechh/CyberFi-Releases' -or
+        $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or $env:GITHUB_RUN_ID -notmatch '^[1-9][0-9]*$' -or
+        $identity.User.Value -notmatch '^S-1-5-21-([0-9]+-){3}500$' -or
+        -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'An owned GitHub-hosted Windows preflight is required.'
+    }
+    $tempRoot = Get-Item -LiteralPath $env:RUNNER_TEMP
+    if (-not $tempRoot.PSIsContainer -or $tempRoot.FullName -notmatch '^[A-Z]:\\a\\_temp$' -or
+        ($tempRoot.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        [IO.Path]::GetDirectoryName($PSScriptRoot) -ine [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)) {
+        throw 'The runner workspace or temporary directory is unexpected.'
+    }
+
+    $report.stage = 'compile-native-preflight'
+    Add-Type -TypeDefinition @'
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.IO;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Security.Principal;
 using System.Text;
 
-public static class CyberFiOwnedLaunch {
+public static class CyberFiStandardLaunch {
     public static string Stage = "initialize";
-    public static string CreationApi = "none", TokenMode = "unknown", DesktopMode = "inherited";
-    public static bool SelectedTokenVerified = false;
-    public sealed class DesktopAccess {
-        public bool currentStationIsWinSta0, currentDesktopIsDefault;
-        public int stationAllError, stationRequiredError, desktopAllError, desktopRequiredError;
-    }
-    public static DesktopAccess ParentDesktopAccess, SelectedDesktopAccess;
-    const uint Query = 8, Suspended = 4, UnicodeEnvironment = 0x400, NoWindow = 0x08000000;
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct StartupInfo {
-        public int cb; public string reserved, desktop, title;
-        public int x, y, xSize, ySize, xChars, yChars, fill, flags;
+        public int size; public string reserved, desktop, title;
+        public int x, y, width, height, columns, rows, fill, flags;
         public short show, reservedBytes; public IntPtr reservedData, stdin, stdout, stderr;
     }
     [StructLayout(LayoutKind.Sequential)]
     struct ProcessInfo { public IntPtr process, thread; public uint pid, tid; }
-    [StructLayout(LayoutKind.Sequential)]
-    struct SidAttributes { public IntPtr sid; public uint attributes; }
-    public sealed class Result {
-        public uint sourcePid; public bool sameSid, elevated, administrator, parentElevated, parentAdministrator, privilegeDropped; public uint exitCode;
-        public string launchTokenMode;
-    }
-    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
-    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, int bytes, out int required);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int kind, IntPtr data, int bytes);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool DuplicateToken(IntPtr token, int level, out IntPtr duplicate);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool ImpersonateLoggedOnUser(IntPtr token);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool RevertToSelf();
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool CheckTokenMembership(IntPtr token, IntPtr sid, out bool member);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateProcessWithLogonW(string user, string domain, IntPtr password, uint logonFlags,
+        string application, StringBuilder command, uint creationFlags, IntPtr environment, string cwd,
+        ref StartupInfo startup, out ProcessInfo process);
     [DllImport("advapi32.dll", SetLastError = true)]
-    static extern bool CreateRestrictedToken(IntPtr token, uint flags, uint disableCount, [In] SidAttributes[] disable, uint deleteCount, IntPtr delete, uint restrictCount, IntPtr restrict, out IntPtr restricted);
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool CreateProcessWithTokenW(IntPtr token, uint logon, string app, StringBuilder command, uint flags, IntPtr env, string cwd, ref StartupInfo startup, out ProcessInfo process);
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool CreateProcessAsUserW(IntPtr token, string app, StringBuilder command, IntPtr processSecurity, IntPtr threadSecurity, bool inherit, uint flags, IntPtr env, string cwd, ref StartupInfo startup, out ProcessInfo process);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool CreateProcessW(string app, StringBuilder command, IntPtr processSecurity, IntPtr threadSecurity, bool inherit, uint flags, IntPtr env, string cwd, ref StartupInfo startup, out ProcessInfo process);
+    static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, int bytes, out int required);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, StringBuilder path, ref int length);
     [DllImport("kernel32.dll", SetLastError = true)] static extern uint ResumeThread(IntPtr thread);
-    [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr process, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetExitCodeProcess(IntPtr process, out uint code);
-    [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr process, uint code);
-    [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
-    [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
-    [DllImport("user32.dll")] static extern IntPtr GetProcessWindowStation();
-    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
-    [DllImport("user32.dll")] static extern IntPtr GetThreadDesktop(uint thread);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformationW(IntPtr handle, int kind, IntPtr data, int bytes, out int required);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenWindowStationW(string name, bool inherit, uint access);
-    [DllImport("user32.dll", SetLastError = true)] static extern bool CloseWindowStation(IntPtr station);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenDesktopW(string name, uint flags, bool inherit, uint access);
-    [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(IntPtr desktop);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll")] static extern bool TerminateProcess(IntPtr process, uint code);
 
-    static void Check(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
-    static string ObjectName(IntPtr handle) {
-        int bytes; GetUserObjectInformationW(handle, 2, IntPtr.Zero, 0, out bytes);
-        if (bytes <= 0 || bytes > 4096) throw new InvalidOperationException("invalid-user-object-name-size");
+    static void Check(bool ok) {
+        if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+    static IntPtr TokenInfo(IntPtr token, int kind) {
+        int bytes;
+        GetTokenInformation(token, kind, IntPtr.Zero, 0, out bytes);
+        if (bytes < 4 || bytes > 65536) throw new InvalidOperationException("unexpected-token-info-size");
         IntPtr data = Marshal.AllocHGlobal(bytes);
-        try { Check(GetUserObjectInformationW(handle, 2, data, bytes, out bytes)); return Marshal.PtrToStringUni(data); }
-        finally { Marshal.FreeHGlobal(data); }
-    }
-    static int ObjectAccess(bool station, uint access) {
-        IntPtr handle = station ? OpenWindowStationW("winsta0", false, access) : OpenDesktopW("default", 0, false, access);
-        if (handle == IntPtr.Zero) return Marshal.GetLastWin32Error();
-        Check(station ? CloseWindowStation(handle) : CloseDesktop(handle)); return 0;
-    }
-    static DesktopAccess ProbeDesktopAccess(IntPtr token) {
-        var probe = new DesktopAccess {
-            currentStationIsWinSta0 = String.Equals(ObjectName(GetProcessWindowStation()), "winsta0", StringComparison.OrdinalIgnoreCase),
-            currentDesktopIsDefault = String.Equals(ObjectName(GetThreadDesktop(GetCurrentThreadId())), "default", StringComparison.OrdinalIgnoreCase)
-        };
-        bool impersonating = false;
         try {
-            if (token != IntPtr.Zero) { Check(ImpersonateLoggedOnUser(token)); impersonating = true; }
-            probe.stationAllError = ObjectAccess(true, 0x37f);
-            probe.stationRequiredError = ObjectAccess(true, 0x23);
-            probe.desktopAllError = probe.currentStationIsWinSta0 ? ObjectAccess(false, 0x1ff) : -1;
-            probe.desktopRequiredError = probe.currentStationIsWinSta0 ? ObjectAccess(false, 0x83) : -1;
-            return probe;
-        } finally { if (impersonating) Check(RevertToSelf()); }
+            Check(GetTokenInformation(token, kind, data, bytes, out bytes));
+            return data;
+        } catch {
+            Marshal.FreeHGlobal(data);
+            throw;
+        }
     }
-    static IntPtr Info(IntPtr token, int kind) {
-        int length; GetTokenInformation(token, kind, IntPtr.Zero, 0, out length);
-        if (length <= 0 || length > 65536) throw new InvalidOperationException("invalid-token-information");
-        IntPtr buffer = Marshal.AllocHGlobal(length);
-        try { Check(GetTokenInformation(token, kind, buffer, length, out length)); return buffer; }
-        catch { Marshal.FreeHGlobal(buffer); throw; }
-    }
-    static int Number(IntPtr token, int kind) {
-        IntPtr data = Info(token, kind);
-        try { return Marshal.ReadInt32(data); } finally { Marshal.FreeHGlobal(data); }
-    }
-    static string Sid(IntPtr token) {
-        IntPtr data = Info(token, 1);
-        try { return new SecurityIdentifier(Marshal.ReadIntPtr(data)).Value; }
-        finally { Marshal.FreeHGlobal(data); }
-    }
-    static bool IsAdministrator(IntPtr token) {
-        byte[] sid = new byte[SecurityIdentifier.MaxBinaryLength];
-        new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null).GetBinaryForm(sid, 0);
-        GCHandle pinned = GCHandle.Alloc(sid, GCHandleType.Pinned); IntPtr duplicate = IntPtr.Zero;
-        try {
-            Check(DuplicateToken(token, 2, out duplicate));
-            bool member; Check(CheckTokenMembership(duplicate, pinned.AddrOfPinnedObject(), out member)); return member;
-        } finally { if (duplicate != IntPtr.Zero) CloseHandle(duplicate); pinned.Free(); }
-    }
-    static void VerifyMedium(IntPtr token, string expectedSid) {
-        if (Sid(token) != expectedSid || Number(token, 20) != 0 || Number(token, 8) != 1 || IsAdministrator(token))
-            throw new InvalidOperationException("same-user-non-elevated-primary-token-required");
-        IntPtr data = Info(token, 25);
-        try {
-            IntPtr sid = Marshal.ReadIntPtr(data);
-            byte count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
-            if (count == 0 || Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1))) != 0x2000)
-                throw new InvalidOperationException("medium-integrity-token-required");
-        } finally { Marshal.FreeHGlobal(data); }
-    }
-    static IntPtr RestrictedMedium(IntPtr current) {
-        IntPtr groups = Info(current, 2), restricted = IntPtr.Zero;
-        try {
-            int count = Marshal.ReadInt32(groups), size = Marshal.SizeOf(typeof(SidAttributes));
-            if (count < 1 || count > 1024) throw new InvalidOperationException("invalid-token-groups");
-            var disabled = new List<SidAttributes>();
-            for (int i = 0; i < count; i++) {
-                var group = (SidAttributes)Marshal.PtrToStructure(IntPtr.Add(groups, IntPtr.Size + i * size), typeof(SidAttributes));
-                string sid = new SecurityIdentifier(group.sid).Value;
-                if (sid == "S-1-5-32-544" || sid == "S-1-5-114" ||
-                    (sid.StartsWith("S-1-5-21-", StringComparison.Ordinal) &&
-                     (sid.EndsWith("-512") || sid.EndsWith("-518") || sid.EndsWith("-519")))) disabled.Add(group);
+    static void VerifyStandardUser(IntPtr token, string expectedSid) {
+        using (var identity = new WindowsIdentity(token)) {
+            if (identity.User.Value != expectedSid ||
+                new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) {
+                throw new InvalidOperationException("owned-standard-user-required");
             }
-            if (disabled.Count == 0) throw new InvalidOperationException("administrative-group-required-for-privilege-drop");
-            // DISABLE_MAX_PRIVILEGE disables privileges; administrative SIDs become deny-only.
-            Check(CreateRestrictedToken(current, 1, (uint)disabled.Count, disabled.ToArray(), 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted));
-            var medium = new SecurityIdentifier("S-1-16-8192"); byte[] sidBytes = new byte[medium.BinaryLength]; medium.GetBinaryForm(sidBytes, 0);
-            IntPtr label = Marshal.AllocHGlobal(size + sidBytes.Length);
-            try {
-                IntPtr sidPointer = IntPtr.Add(label, size); Marshal.Copy(sidBytes, 0, sidPointer, sidBytes.Length);
-                Marshal.StructureToPtr(new SidAttributes { sid = sidPointer, attributes = 0x20 }, label, false);
-                Check(SetTokenInformation(restricted, 25, label, size + sidBytes.Length));
-            } finally { Marshal.FreeHGlobal(label); }
-            IntPtr result = restricted; restricted = IntPtr.Zero; return result;
-        } finally { if (restricted != IntPtr.Zero) CloseHandle(restricted); Marshal.FreeHGlobal(groups); }
+        }
+        IntPtr elevation = TokenInfo(token, 20);
+        try {
+            if (Marshal.ReadInt32(elevation) != 0) throw new InvalidOperationException("non-elevated-token-required");
+        } finally { Marshal.FreeHGlobal(elevation); }
+
+        IntPtr integrity = TokenInfo(token, 25);
+        try {
+            if (new SecurityIdentifier(Marshal.ReadIntPtr(integrity)).Value != "S-1-16-8192")
+                throw new InvalidOperationException("medium-integrity-required");
+        } finally { Marshal.FreeHGlobal(integrity); }
     }
-    static string Quote(string value) {
-        if (String.IsNullOrEmpty(value) || value.IndexOfAny(new char[] {'"', '\0', '\r', '\n'}) >= 0 || value.EndsWith("\\"))
-            throw new InvalidOperationException("invalid-fixed-launch-argument");
-        return "\"" + value + "\"";
-    }
-    static IntPtr EnvironmentBlock() {
-        var entries = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (DictionaryEntry item in Environment.GetEnvironmentVariables()) {
-            string key = (string)item.Key, value = (string)item.Value;
-            if (key.IndexOf('=') >= 0 || key.IndexOf('\0') >= 0 || value.IndexOf('\0') >= 0)
-                throw new InvalidOperationException("invalid-environment-entry");
-            entries.Add(key, value);
+    static IntPtr EnvironmentBlock(IDictionary values) {
+        var sorted = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DictionaryEntry entry in values) {
+            string name = (string)entry.Key, value = (string)entry.Value;
+            if (String.IsNullOrEmpty(name) || name.IndexOfAny(new char[] { '=', '\0' }) >= 0 || value.IndexOf('\0') >= 0)
+                throw new InvalidOperationException("invalid-fixture-environment");
+            sorted.Add(name, value);
         }
         var block = new StringBuilder();
-        foreach (var entry in entries) block.Append(entry.Key).Append('=').Append(entry.Value).Append('\0');
-        block.Append('\0');
-        return Marshal.StringToHGlobalUni(block.ToString());
+        foreach (var entry in sorted) block.Append(entry.Key).Append('=').Append(entry.Value).Append('\0');
+        return Marshal.StringToHGlobalUni(block.Append('\0').ToString());
     }
-    public static Result Run(string executable, string[] arguments) {
-        IntPtr current = IntPtr.Zero, linked = IntPtr.Zero, childToken = IntPtr.Zero, environment = IntPtr.Zero;
-        ProcessInfo child = new ProcessInfo(); bool finished = false;
+    public static uint Run(string user, SecureString password, string sid, string executable, string script, string cwd, IDictionary values) {
+        if (executable.IndexOf('"') >= 0 || script.IndexOf('"') >= 0)
+            throw new InvalidOperationException("invalid-fixed-probe-path");
+        var command = new StringBuilder("\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -File \"" + script + "\"");
+        if (command.Length >= 1024) throw new InvalidOperationException("probe-command-too-long");
+        var startup = new StartupInfo { size = Marshal.SizeOf(typeof(StartupInfo)), flags = 1, show = 0 };
+        ProcessInfo child = new ProcessInfo();
+        IntPtr token = IntPtr.Zero, environment = IntPtr.Zero;
+        bool exited = false;
         try {
-            Stage = "current-token"; Check(OpenProcessToken(GetCurrentProcess(), Query | 2 | 1 | 0x80, out current));
-            string sid = Sid(current); bool elevated = Number(current, 20) != 0, parentAdministrator = IsAdministrator(current);
-            Stage = "probe-parent-desktop-access"; ParentDesktopAccess = ProbeDesktopAccess(IntPtr.Zero);
-            string tokenMode = "current-medium";
-            IntPtr launchToken = current;
-            if (elevated) {
-                if (Number(current, 18) == 1) {
-                    Stage = "restrict-full-administrator-token";
-                    linked = RestrictedMedium(current); tokenMode = "restricted-medium";
-                } else {
-                    Stage = "linked-medium-token";
-                    IntPtr data = Info(current, 19);
-                    try { linked = Marshal.ReadIntPtr(data); } finally { Marshal.FreeHGlobal(data); }
-                    tokenMode = "linked-medium";
-                }
-                if (linked == IntPtr.Zero) throw new InvalidOperationException("linked-token-unavailable");
-                launchToken = linked;
-            }
-            VerifyMedium(launchToken, sid); SelectedTokenVerified = true; TokenMode = tokenMode;
-            Stage = "probe-selected-desktop-access"; SelectedDesktopAccess = ProbeDesktopAccess(launchToken);
-            var command = new StringBuilder(Quote(executable));
-            foreach (string argument in arguments) command.Append(' ').Append(Quote(argument));
-            environment = EnvironmentBlock();
-            var startup = new StartupInfo(); startup.cb = Marshal.SizeOf(typeof(StartupInfo));
-            startup.flags = 1; startup.show = 0;
-            Stage = "create-suspended-owned-child";
-            uint flags = Suspended | UnicodeEnvironment | NoWindow;
-            if (tokenMode == "restricted-medium") {
-                // Windows documents CreateProcessAsUser for a restricted version of the caller's own token.
-                CreationApi = "CreateProcessAsUserW";
-                // Select the existing user desktop instead of inheriting a privileged launcher's station.
-                startup.desktop = @"winsta0\default"; DesktopMode = "existing-user-desktop";
-                Check(CreateProcessAsUserW(launchToken, executable, command, IntPtr.Zero, IntPtr.Zero, false, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
-            } else if (elevated) {
-                CreationApi = "CreateProcessWithTokenW";
-                Check(CreateProcessWithTokenW(launchToken, 0, executable, command, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
-            } else {
-                CreationApi = "CreateProcessW";
-                Check(CreateProcessW(executable, command, IntPtr.Zero, IntPtr.Zero, false, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
-            }
-            Stage = "verify-suspended-child-token";
-            Check(OpenProcessToken(child.process, Query | 2, out childToken)); VerifyMedium(childToken, sid);
-            var image = new StringBuilder(32768); int length = image.Capacity;
+            environment = EnvironmentBlock(values);
+            Stage = "create-suspended-standard-user-probe";
+            IntPtr nativePassword = Marshal.SecureStringToGlobalAllocUnicode(password);
+            try {
+                // The hosted runner experiment succeeded with logon flags zero and an unnamed desktop.
+                const uint flags = 4 | 0x400 | 0x08000000; // Suspended, Unicode environment, no console window.
+                Check(CreateProcessWithLogonW(user, ".", nativePassword, 0, executable, command, flags,
+                    environment, cwd, ref startup, out child));
+            } finally { Marshal.ZeroFreeGlobalAllocUnicode(nativePassword); }
+
+            Stage = "verify-suspended-probe";
+            Check(OpenProcessToken(child.process, 10, out token));
+            VerifyStandardUser(token, sid);
+            var image = new StringBuilder(32768);
+            int length = image.Capacity;
             Check(QueryFullProcessImageNameW(child.process, 0, image, ref length));
             if (!String.Equals(image.ToString(), executable, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("unexpected-child-image");
-            Stage = "resume-verified-owned-child";
+                throw new InvalidOperationException("unexpected-probe-image");
+
+            Stage = "run-verified-probe";
             if (ResumeThread(child.thread) != 1) throw new Win32Exception(Marshal.GetLastWin32Error());
-            Stage = "wait-for-owned-child";
-            if (WaitForSingleObject(child.process, 15 * 60 * 1000) != 0)
-                throw new InvalidOperationException("owned-child-wait-failed");
-            uint exit; Check(GetExitCodeProcess(child.process, out exit)); finished = true;
-            Stage = "complete";
-            return new Result { sourcePid = child.pid, sameSid = true, elevated = false, administrator = false, parentElevated = elevated,
-                parentAdministrator = parentAdministrator, privilegeDropped = elevated, launchTokenMode = tokenMode, exitCode = exit };
+            if (WaitForSingleObject(child.process, 30000) != 0) throw new InvalidOperationException("probe-wait-failed");
+            exited = true;
+            uint exitCode;
+            Check(GetExitCodeProcess(child.process, out exitCode));
+            return exitCode;
         } finally {
-            if (!finished && child.process != IntPtr.Zero) TerminateProcess(child.process, 1);
-            if (childToken != IntPtr.Zero) CloseHandle(childToken);
+            if (child.process != IntPtr.Zero && !exited) {
+                TerminateProcess(child.process, 1);
+                WaitForSingleObject(child.process, 5000);
+            }
+            if (token != IntPtr.Zero) CloseHandle(token);
             if (child.thread != IntPtr.Zero) CloseHandle(child.thread);
             if (child.process != IntPtr.Zero) CloseHandle(child.process);
             if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
-            if (linked != IntPtr.Zero) CloseHandle(linked);
-            if (current != IntPtr.Zero) CloseHandle(current);
         }
     }
 }
 '@
 
-function Assert-NoReparsePoint([string]$Path) {
-    $item = Get-Item -LiteralPath $Path -Force
-    while ($null -ne $item) {
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse point refused.' }
-        if ($item -is [IO.FileInfo]) { $item = $item.Directory } else { $item = $item.Parent }
+    $report.stage = 'create-owned-standard-user'
+    $nonce = [Guid]::NewGuid().ToString('N')
+    $accountName = 'cfprobe' + $nonce.Substring(0, 12)
+    $description = 'CyberFi owned launch preflight ' + $nonce
+    if (Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue) { throw 'The fixture account name already exists.' }
+    $random = [byte[]]::new(32)
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($random) } finally { $rng.Dispose() }
+    $password = [Security.SecureString]::new()
+    try {
+        foreach ($character in ('Aa1!' + [Convert]::ToBase64String($random)).ToCharArray()) { $password.AppendChar($character) }
+        $password.MakeReadOnly()
+    } finally { [Array]::Clear($random, 0, $random.Length) }
+    $accountAttempted = $true
+    $account = New-LocalUser -Name $accountName -Password $password -Description $description -AccountExpires (Get-Date).AddMinutes(20)
+    $accountSid = [Security.Principal.SecurityIdentifier]::new([string]$account.SID)
+    if ($accountSid.Value -ceq $identity.User.Value) { throw 'The fixture must have its own SID.' }
+    $usersGroup = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    if (-not (Get-LocalGroupMember -SID $usersGroup | Where-Object { [string]$_.SID -eq $accountSid.Value })) {
+        Add-LocalGroupMember -SID $usersGroup -Member $accountSid.Value
     }
-}
 
-try {
-    if ($SelfTest) {
-        $probeRoot = Join-Path ([IO.Path]::GetTempPath()) ('cyberfi-owned-launch-' + [Guid]::NewGuid().ToString('N'))
-        [void][IO.Directory]::CreateDirectory($probeRoot)
-        $probeReport = Join-Path $probeRoot 'result.json'
-        $probeValue = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('VMO8cmvDp2UgZGXEn2VyaTsgJVBBVEglICYgImFsxLFudMSxIgp5ZW5pIHNhdMSxcg=='))
-        $env:CYBERFI_OWNED_LAUNCH_PROBE = $probeValue
-        $env:CYBERFI_OWNED_LAUNCH_REPORT = $probeReport
-        $probeCode = @'
-$ErrorActionPreference='Stop'
-$expected=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('VMO8cmvDp2UgZGXEn2VyaTsgJVBBVEglICYgImFsxLFudMSxIgp5ZW5pIHNhdMSxcg=='))
-$match=([Environment]::GetEnvironmentVariable('CYBERFI_OWNED_LAUNCH_PROBE') -ceq $expected)
-[IO.File]::WriteAllText($env:CYBERFI_OWNED_LAUNCH_REPORT,('{"environmentPreserved":'+$match.ToString().ToLowerInvariant()+'}'))
-if(-not $match){exit 19}
+    $report.stage = 'prepare-owned-fixture'
+    $fixture = New-Item -ItemType Directory -Path (Join-Path $tempRoot.FullName ('cyberfi-standard-launch-' + $nonce))
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new($accountSid, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+    $acl = Get-Acl -LiteralPath $fixture.FullName
+    $acl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $fixture.FullName -AclObject $acl
+    $probe = Join-Path $fixture.FullName 'probe.ps1'
+    $receipt = Join-Path $fixture.FullName 'result.json'
+    $probeSource = @'
+$ErrorActionPreference = 'Stop'
+$expected = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('VMO8cmvDp2UgZGXEn2VyaTsgJVBBVEglICYgImFsxLFudMSxIgp5ZW5pIHNhdMSxcg=='))
+$preserved = [Environment]::GetEnvironmentVariable('CYBERFI_OWNED_LAUNCH_PROBE') -ceq $expected
+$sidMatches = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ceq $env:CYBERFI_OWNED_LAUNCH_SID
+$result = '{"environmentPreserved":' + $preserved.ToString().ToLowerInvariant() + ',"sidMatches":' + $sidMatches.ToString().ToLowerInvariant() + '}'
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'result.json'), $result)
+if (-not $preserved -or -not $sidMatches) { exit 19 }
 exit 23
 '@
-        $probeExecutable = (Get-Process -Id $PID).Path
-        $selfTestDiagnostic = [ordered]@{ childExitCode=$null; receiptExists=$false; receiptBytes=$null; environmentPreserved=$null; cleanupSucceeded=$false }
-        try {
-            $result = [CyberFiOwnedLaunch]::Run($probeExecutable, @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probeCode))))
-            [CyberFiOwnedLaunch]::Stage = 'selftest-receipt'
-            $selfTestDiagnostic.childExitCode = $result.exitCode
-            $selfTestDiagnostic.receiptExists = Test-Path -LiteralPath $probeReport
-            if ($selfTestDiagnostic.receiptExists) { $selfTestDiagnostic.receiptBytes = (Get-Item -LiteralPath $probeReport).Length }
-            if (-not $selfTestDiagnostic.receiptExists -or $selfTestDiagnostic.receiptBytes -gt 256) { throw 'Owned self-test receipt missing or oversized.' }
-            $probe = Get-Content -LiteralPath $probeReport -Raw | ConvertFrom-Json
-            $selfTestDiagnostic.environmentPreserved = $probe.environmentPreserved -eq $true
-            [CyberFiOwnedLaunch]::Stage = 'selftest-assertions'
-            if (-not $probe.environmentPreserved -or $result.exitCode -ne 23 -or -not $result.sameSid -or $result.elevated) { throw 'Owned launcher self-test failed.' }
-            [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; creationApi=[CyberFiOwnedLaunch]::CreationApi; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; parentDesktopAccess=[CyberFiOwnedLaunch]::ParentDesktopAccess; selectedDesktopAccess=[CyberFiOwnedLaunch]::SelectedDesktopAccess; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
-        } finally {
-            $probeStage = [CyberFiOwnedLaunch]::Stage
-            [CyberFiOwnedLaunch]::Stage = 'selftest-cleanup'
-            Assert-NoReparsePoint $probeRoot
-            if (Test-Path -LiteralPath $probeReport) {
-                Assert-NoReparsePoint $probeReport
-                [IO.File]::Delete($probeReport)
-            }
-            [IO.Directory]::Delete($probeRoot, $false)
-            $selfTestDiagnostic.cleanupSucceeded = $true
-            [CyberFiOwnedLaunch]::Stage = $probeStage
-        }
-        exit 0
+    [IO.File]::WriteAllText($probe, $probeSource)
+    $systemDirectory = [Environment]::SystemDirectory
+    $nativePowerShell = Join-Path $systemDirectory 'WindowsPowerShell\v1.0\powershell.exe'
+    $windowsDirectory = [IO.Path]::GetDirectoryName($systemDirectory)
+    $environment = @{
+        SystemRoot = $windowsDirectory
+        WINDIR = $windowsDirectory
+        Path = $systemDirectory
+        PSModulePath = Join-Path $systemDirectory 'WindowsPowerShell\v1.0\Modules'
+        HOMEDRIVE = $fixture.FullName.Substring(0, 2)
+        HOMEPATH = $fixture.FullName.Substring(2)
+        USERPROFILE = $fixture.FullName
+        TEMP = $fixture.FullName
+        TMP = $fixture.FullName
+        CYBERFI_OWNED_LAUNCH_SID = $accountSid.Value
+        CYBERFI_OWNED_LAUNCH_PROBE = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('VMO8cmvDp2UgZGXEn2VyaTsgJVBBVEglICYgImFsxLFudMSxIgp5ZW5pIHNhdMSxcg=='))
     }
 
-    [CyberFiOwnedLaunch]::Stage = 'validate-owned-test-paths'
-    if ([string]::IsNullOrEmpty($env:RUNNER_TEMP) -or [string]::IsNullOrEmpty($env:APPDATA)) { throw 'Hosted runner paths required.' }
-    $expectedExecutable = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'cyberfi-windows-auth-update\Applications\CyberFi\CyberFi.exe'))
-    $expectedProfile = [IO.Path]::GetFullPath((Join-Path $env:APPDATA 'CyberFi'))
-    if ([IO.Path]::GetFullPath($Executable) -ine $expectedExecutable -or [IO.Path]::GetFullPath($Profile) -ine $expectedProfile) { throw 'Exact owned test paths required.' }
-    Assert-NoReparsePoint $expectedExecutable
-    Assert-NoReparsePoint $expectedProfile
-    if ($args.Count -ne 2 -or $args[0] -ine ('--user-data-dir=' + $expectedProfile) -or $args[1] -cne '--debug') { throw 'Exact existing owned Gym arguments required.' }
-    [CyberFiOwnedLaunch]::Stage = 'validate-hidden-gym-environment'
-    if ($env:HAPPY_DESKTOP_WINDOWS_HIDDEN -cne '1' -or $env:HAPPY_DESKTOP_DEBUG -cne '1' -or $env:HAPPY_DEBUG_RENDERER_PORT -cne '19486') { throw 'Existing hidden Gym environment required.' }
-    $result = [CyberFiOwnedLaunch]::Run($expectedExecutable, [string[]]$args)
-    $result | ConvertTo-Json -Compress
-    exit ([int]$result.exitCode)
-} catch {
-    $nativeError = $null
-    $cause = $_.Exception
-    while ($null -ne $cause) {
-        if ($cause -is [ComponentModel.Win32Exception]) { $nativeError = $cause.NativeErrorCode; break }
-        $cause = $cause.InnerException
+    $report.stage = 'native-launch'
+    $report.childExitCode = [CyberFiStandardLaunch]::Run($account.Name, $password, $accountSid.Value, $nativePowerShell, $probe, $fixture.FullName, $environment)
+    $report.fixtureSidVerified = $true
+    $report.elevated = $false
+    $report.administrator = $false
+    $report.mediumIntegrity = $true
+    $report.stage = 'verify-probe-receipt'
+    $report.receiptExists = [IO.File]::Exists($receipt)
+    if (-not $report.receiptExists) { throw 'The child probe did not write its receipt.' }
+    $receiptFile = Get-Item -LiteralPath $receipt
+    if ($receiptFile.Length -gt 256 -or ($receiptFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'The child probe receipt is invalid.'
     }
-    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified; parentDesktopAccess=[CyberFiOwnedLaunch]::ParentDesktopAccess; selectedDesktopAccess=[CyberFiOwnedLaunch]::SelectedDesktopAccess; selfTest=$selfTestDiagnostic } | ConvertTo-Json -Compress))
-    exit 1
+    $result = Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+    $report.environmentPreserved = $result.environmentPreserved -eq $true
+    $report.exitCodePropagated = $report.childExitCode -eq 23
+    $report.success = $report.environmentPreserved -and $report.exitCodePropagated -and $result.sidMatches -eq $true
+} catch {
+    if ($report.stage -eq 'native-launch') { $report.stage = [CyberFiStandardLaunch]::Stage }
+    for ($cause = $_.Exception; $null -ne $cause; $cause = $cause.InnerException) {
+        if ($cause -is [ComponentModel.Win32Exception]) { $report.nativeError = $cause.NativeErrorCode; break }
+    }
+} finally {
+    if ($accountAttempted) {
+        try {
+            $candidate = Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue
+            if ($candidate) {
+                if ($candidate.Description -cne $description -or ($account -and $candidate.SID -ne $account.SID)) {
+                    throw 'Fixture account identity changed.'
+                }
+                Remove-LocalUser -SID $candidate.SID
+            }
+            $report.accountRemoved = -not (Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue)
+        } catch { $report.accountRemoved = $false }
+    }
+    if ($fixture) {
+        try {
+            $directory = Get-Item -LiteralPath $fixture.FullName -Force
+            if (($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Fixture became a reparse point.' }
+            foreach ($name in 'probe.ps1', 'result.json') {
+                $path = Join-Path $directory.FullName $name
+                $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                if ($item) {
+                    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Unexpected fixture entry.' }
+                    [IO.File]::Delete($path)
+                }
+            }
+            [IO.Directory]::Delete($directory.FullName, $false)
+            $report.fixtureRemoved = $true
+        } catch { $report.fixtureRemoved = $false }
+    }
+    if ($password) { $password.Dispose() }
+    if ($identity) { $identity.Dispose() }
 }
+$report.success = $report.success -and $report.accountRemoved -and $report.fixtureRemoved
+if ($report.success) { $report.stage = 'complete' }
+[pscustomobject]$report | ConvertTo-Json -Compress
+if ($report.success) { exit 0 }
+exit 1
