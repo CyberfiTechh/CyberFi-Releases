@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, verify, randomBytes } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, readdir, realpath, writeFile, lstat, stat } from "node:fs/promises";
+import { constants, createReadStream, createWriteStream } from "node:fs";
+import { chmod, copyFile, mkdir, readFile, readdir, realpath, writeFile, lstat, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -73,6 +73,10 @@ function engineDiagnosticText(value, secrets) {
         .replace(/(["']?\b(?:token|password|secret|api[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, "$1[REDACTED]")
         .split(/\r?\n/u).filter(line => !/token|password|secret|credential|api[_-]?key|bearer|authorization|cookie/iu.test(line) && !/^\s*(?:headers|request body|response body|HTTP\/\d)\s*[:= ]/iu.test(line) && !/^\s*[\{\[]["\{\[]/u.test(line)).join("\n");
     return Buffer.from(text).subarray(0, 4096).toString("utf8");
+}
+function dialogErrorFirstLine(value) { return String(value ?? "").split(/\r?\n/u, 1)[0].trim(); }
+function knownNoDialogRace(value) {
+    return /^(?:dialog\.dismiss: )?Protocol error \(Page\.handleJavaScriptDialog\): No dialog is showing\.?$/u.test(dialogErrorFirstLine(value));
 }
 
 async function main() {
@@ -276,6 +280,26 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const { gymHostEnvironment } = await import(gym("hostEnvironment"));
         const { happyAgentClientCreate, GymHappyAgentClient } = await import(gym("happyAgentProtocol"));
         ({ paths } = await gymRunPathsCreate("smoke"));
+        stage = "production managed engine cache precondition";
+        const desktopMain = name => pathToFileURL(join(upstream, "packages/happy-desktop-electron/sources/main", name + ".ts")).href;
+        const { happyDaemonPaths, happyAgentBinaryPath } = await import(desktopMain("happyAgentBinaryPaths"));
+        const { happyAgentBinarySelected } = await import(desktopMain("happyAgentBinaryConfig"));
+        const { happyAgentReleaseInstall } = await import(desktopMain("happyAgentRelease"));
+        const cachePaths = happyDaemonPaths({ HAPPY_HOME_DIR: paths.happyHome }, paths.home);
+        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.118");
+        assert(cachedEngine.startsWith(paths.root + sep) && cachePaths.binaryConfigPath.startsWith(paths.root + sep));
+        await mkdir(dirname(cachedEngine), { recursive: true, mode: 0o700 });
+        await copyFile(engine, cachedEngine, constants.COPYFILE_EXCL); await chmod(cachedEngine, 0o700);
+        const extractedBinarySha = await hashFile(engine); assert.equal(await hashFile(cachedEngine), extractedBinarySha);
+        // Consume verified cached bytes through the normal lock/data-floor/
+        // atomic-selection producer. No fetch interception or forged status.
+        const installed = await happyAgentReleaseInstall({ version: "0.4.118", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
+        assert(installed.version === "0.4.118" && installed.path === cachedEngine);
+        assert.deepEqual(await happyAgentBinarySelected(cachePaths), installed);
+        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.118");
+        const cacheConfig = JSON.parse(await readFile(cachePaths.binaryConfigPath, "utf8"));
+        assert.deepEqual(cacheConfig, { downloadedVersions: ["0.4.118"], selectedVersion: "0.4.118" });
+        report.managedEnginePrecondition = { producer: "pinned upstream happyAgentReleaseInstall consuming verified cached bytes", version: installed.version, executableSha256: extractedBinarySha, config: cacheConfig, fetchOverridden: false, dataVersionFabricated: false };
         inferenceToken = randomBytes(24).toString("hex"); let inferenceCalls = 0;
         inference = createServer(async (request, response) => {
             for await (const _ of request) { /* Synthetic inputs are never logged. */ }
@@ -556,13 +580,21 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         // races Electron's authoritative forced reload on macOS; never accept
         // the dialog, which would bypass the behavior this test must prove.
         let beforeUnloadSignals = 0, stayDialogs = 0, dismissRaces = 0, unexpectedDialogs = 0, unknownDialogError = false;
-        const dialogSettlements = [];
+        const dialogSettlements = [], unknownDialogDiagnostics = [];
         page.on("console", message => { if (message.text() === "cyberai-acceptance-beforeunload-stay") beforeUnloadSignals++; });
         page.on("dialog", dialog => {
             if (dialog.type() === "beforeunload") stayDialogs++; else unexpectedDialogs++;
             dialogSettlements.push(dialog.dismiss().catch(error => {
-                if (/^(?:dialog\.dismiss: )?Protocol error \(Page\.handleJavaScriptDialog\): No dialog is showing\.?$/u.test(String(error?.message ?? "").split("\n", 1)[0])) dismissRaces++;
-                else unknownDialogError = true;
+                if (knownNoDialogRace(error?.message)) dismissRaces++;
+                else {
+                    unknownDialogError = true;
+                    const firstLine = dialogErrorFirstLine(error?.message);
+                    const diagnostic = { kind: error?.name === "ProtocolError" ? "ProtocolError" : "dialog-error" };
+                    // Only this known local CDP operation is eligible; never
+                    // inspect dialog text or record unrelated HTTP/auth errors.
+                    if (/^(?:dialog\.dismiss: )?Protocol error \(Page\.handleJavaScriptDialog\):/u.test(firstLine)) diagnostic.firstLine = engineDiagnosticText(firstLine, [username, password, inferenceToken]).slice(0, 256);
+                    unknownDialogDiagnostics.push(diagnostic);
+                }
             }));
         });
         const marker = randomBytes(16).toString("hex");
@@ -575,7 +607,7 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         await page.waitForFunction(() => window.__cyberaiLogoutMarker === undefined && !!document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"]'), undefined, { timeout: 30000 });
         stage = "forced logout beforeunload proof";
         await Promise.all(dialogSettlements);
-        report.beforeUnloadProof = { signals: beforeUnloadSignals, requestedStayDialogs: stayDialogs, dismissedDialogRaces: dismissRaces, acceptedDialogs: 0, oldContextDestroyed: true, unknownDialogError };
+        report.beforeUnloadProof = { signals: beforeUnloadSignals, requestedStayDialogs: stayDialogs, dismissedDialogRaces: dismissRaces, acceptedDialogs: 0, oldContextDestroyed: true, unknownDialogError, unknownDialogDiagnostics };
         assert(beforeUnloadSignals > 0 && unexpectedDialogs === 0 && !unknownDialogError, "The renderer must actually attempt to prevent logout navigation without unrelated dialog errors");
         await denied(); await assert.rejects(lstat(saved), { code: "ENOENT" });
         assert.equal(sockets.size, 0); report.logoutTransportProof = observedSockets ? "Observed workspace WebSockets closed and old document destroyed" : "Old workspace document destroyed; no WebSocket was observed";
@@ -662,6 +694,10 @@ if (process.argv.includes("--self-test")) {
     assert(diagnostic.includes("native engine startup"));
     for (const value of ["private-token", "private-password", "private-user", "generic-token", "generic-secret", "Authorization:", "server-value", "access-value", "secret-value", "server_token", "accessToken", "secretKey"]) assert(!diagnostic.includes(value));
     assert(Buffer.byteLength(engineDiagnosticText("x".repeat(9000), [])) <= 4096);
+    assert(knownNoDialogRace("dialog.dismiss: Protocol error (Page.handleJavaScriptDialog): No dialog is showing\r\nCall log:\r\n - waiting"));
+    assert(knownNoDialogRace("Protocol error (Page.handleJavaScriptDialog): No dialog is showing\nCall log:"));
+    assert(!knownNoDialogRace("dialog.dismiss: Protocol error (Page.handleJavaScriptDialog): Internal error\r\nCall log:"));
+    assert(!knownNoDialogRace("Target page, context or browser has been closed"));
     assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.125-x64.exe", pin.sha256, 10));
     console.log("Strict artifact pins, redirect refusal, independent RSA refusal and credential environment isolation passed. No app or network used.");
 } else await main();
