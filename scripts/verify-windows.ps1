@@ -210,8 +210,10 @@ function Assert-Smoke([string]$Path) {
 
 $installers = @{}
 $verifiedSizes = @{}
+$releaseHeaders = @{ Accept = 'application/vnd.github+json' }
+if ($env:GH_TOKEN) { $releaseHeaders.Authorization = 'Bearer ' + $env:GH_TOKEN }
 foreach ($version in $versions) {
-    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/v$version" -Headers @{ Accept = 'application/vnd.github+json' } -TimeoutSec 30 -MaximumRetryCount 2 -RetryIntervalSec 2
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/v$version" -Headers $releaseHeaders -TimeoutSec 30 -MaximumRetryCount 2 -RetryIntervalSec 2
     Assert-True (-not $release.draft -and $release.tag_name -ceq "v$version") 'Expected an actual published release'
     $release | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath (Join-Path $evidence "release-$version.json") -Encoding utf8
     $name = "CyberFi-$version-x64.exe"
@@ -262,6 +264,7 @@ foreach ($version in $versions) {
 }
 
 # No token is inherited by the installer or its automatically relaunched app.
+Remove-Variable releaseHeaders
 foreach ($name in @((Get-ChildItem Env: | Where-Object { $_.Name -match 'TOKEN|SECRET|PASSWORD|CREDENTIAL' }).Name) + @('HAPPY_AGENT_SERVER_SOCKET_PATH')) {
     Remove-Item "Env:$name" -ErrorAction SilentlyContinue
 }
