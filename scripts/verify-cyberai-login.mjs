@@ -66,6 +66,14 @@ function missingOwnedKeychainDefaultConfirmed(defaults, list, reads) {
     const failed = reads.filter(read => !read.success);
     return defaults.length === 0 && list.length === 0 && failed.length === 1 && failed[0].context === "owned-home" && failed[0].verb === "default-keychain" && failed[0].exitCode === 1 && /A default keychain could not be found/iu.test(failed[0].diagnostic);
 }
+function engineDiagnosticText(value, secrets) {
+    let text = String(value ?? "").replace(/\x1b\[[0-9;]*m/gu, "");
+    for (const secret of secrets.filter(value => typeof value === "string" && value.length > 0)) text = text.replaceAll(secret, "[REDACTED]");
+    text = text.replace(/\bBearer\s+[^\s"'<>]+/giu, "Bearer [REDACTED]")
+        .replace(/(["']?\b(?:token|password|secret|api[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, "$1[REDACTED]")
+        .split(/\r?\n/u).filter(line => !/token|password|secret|credential|api[_-]?key|bearer|authorization|cookie/iu.test(line) && !/^\s*(?:headers|request body|response body|HTTP\/\d)\s*[:= ]/iu.test(line) && !/^\s*[\{\[]["\{\[]/u.test(line)).join("\n");
+    return Buffer.from(text).subarray(0, 4096).toString("utf8");
+}
 
 async function main() {
     const target = process.env.TARGET;
@@ -91,7 +99,7 @@ async function main() {
         catch (error) {
             // Never retain arbitrary stderr, command arguments, HTTP bodies or headers.
             const text = typeof error.stderr === "string" ? error.stderr : "";
-            error.cyberaiCommand = { tool: basename(file), verb: ["default-keychain", "list-keychains", "show-keychain-info", "create-keychain", "unlock-keychain", "set-keychain-settings", "start", "stop", "--version", "-tzf", "-xzf", "init", "-C"].includes(args[0]) ? args[0] : "native-operation", exitCode: Number.isSafeInteger(error.code) ? error.code : null,
+            error.cyberaiCommand = { tool: basename(file), verb: ["default-keychain", "list-keychains", "show-keychain-info", "create-keychain", "delete-keychain", "unlock-keychain", "set-keychain-settings", "start", "stop", "--version", "-tzf", "-xzf", "init", "-C"].includes(args[0]) ? args[0] : "native-operation", exitCode: Number.isSafeInteger(error.code) ? error.code : null,
                 noDefaultKeychain: /default keychain could not be found/iu.test(text), keychainNotFound: /specified keychain could not be found/iu.test(text), interactionNotAllowed: /interaction is not allowed/iu.test(text), permissionDenied: /permission denied|access is denied/iu.test(text), missingFile: /no such file|cannot find the file/iu.test(text) };
             throw error;
         }
@@ -147,7 +155,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         }
         return found;
     }
-    let executable, mounted, runtime, inference, paths, browser, page, video, run, runResult, runError, ownedPid, watcher, visibilityDone, watcherStop, keychainCleanup;
+    let executable, mounted, runtime, inference, inferenceToken, paths, browser, page, video, run, runResult, runError, ownedPid, watcher, visibilityDone, watcherStop, keychainCleanup;
     let stage = "artifact verification";
     const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
     async function processProof(pid) {
@@ -268,7 +276,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const { gymHostEnvironment } = await import(gym("hostEnvironment"));
         const { happyAgentClientCreate, GymHappyAgentClient } = await import(gym("happyAgentProtocol"));
         ({ paths } = await gymRunPathsCreate("smoke"));
-        const inferenceToken = randomBytes(24).toString("hex"); let inferenceCalls = 0;
+        inferenceToken = randomBytes(24).toString("hex"); let inferenceCalls = 0;
         inference = createServer(async (request, response) => {
             for await (const _ of request) { /* Synthetic inputs are never logged. */ }
             if (request.headers.authorization !== "Bearer " + inferenceToken) { response.writeHead(401); response.end(); return; }
@@ -281,9 +289,21 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const engineEnv = { ...systemEnv, ...gymHostEnvironment(paths), HAPPY_HOME_DIR: paths.happyHome, HAPPY_AGENT_PROJECTS_DIRECTORY: paths.projects, HAPPY_AGENT_WORKSPACES_DIRECTORY: paths.workspaces, HAPPY_AGENT_SERVER_SOCKET_PATH: paths.socketPath, HAPPY_AGENT_SERVER_TOKEN_PATH: paths.tokenPath, HAPPY_GYM_INFERENCE_URL: `http://127.0.0.1:${inference.address().port}/inference`, HAPPY_GYM_TOKEN: inferenceToken };
         if (!windows) {
             stage = "native Keychain environment preflight";
+            // HOME alone need not select Foundation's user domain. Observe the
+            // real NSHomeDirectory first, then align the isolated OS domain used
+            // by both security(1) and Electron across both native lifetimes.
+            const homeSource = join(root, "foundation-home.swift"), homeProbe = join(root, "foundation-home");
+            await writeFile(homeSource, "import Foundation\nprint(NSHomeDirectory())\n");
+            await command("/usr/bin/swiftc", ["-O", homeSource, "-o", homeProbe], { timeout: 180000 });
+            const runnerFoundationHome = await command(homeProbe, [], { env: safeEnv });
+            const withoutOverride = await command(homeProbe, [], { env: engineEnv });
+            engineEnv.CFFIXED_USER_HOME = paths.home;
+            const withOverride = await command(homeProbe, [], { env: engineEnv });
+            report.keychainFoundationHome = { runner: runnerFoundationHome, isolatedHomeWithoutOverride: withoutOverride, isolatedHomeWithOverride: withOverride, intendedIsolatedHome: paths.home };
+            assert.equal(await realpath(withOverride), await realpath(paths.home), "Foundation must resolve the same owned home as the native app");
             const security = (args, env) => command("/usr/bin/security", args, { env, timeout: 30000 });
             const keychains = output => output.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).map(line => { const value = JSON.parse(line); assert(typeof value === "string" && value.startsWith("/") && !value.includes("\n")); return value; });
-            report.keychainPreflight = { runnerHome: safeEnv.HOME, ownedHome: engineEnv.HOME, cfFixedUserHomePresent: !!safeEnv.CFFIXED_USER_HOME, reads: [] };
+            report.keychainPreflight = { runnerHome: safeEnv.HOME, ownedHome: engineEnv.HOME, runnerCfFixedUserHomePresent: !!safeEnv.CFFIXED_USER_HOME, ownedCfFixedUserHome: engineEnv.CFFIXED_USER_HOME, reads: [] };
             let keychainReadError;
             const securityRead = async (verb, env, context) => {
                 assert(["default-keychain", "list-keychains"].includes(verb));
@@ -499,6 +519,15 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         report.failureKind = ["Error", "AssertionError", "TimeoutError", "TypeError"].includes(error?.name) ? error.name : "native-error";
         if (typeof error?.code === "string" && /^[A-Z_0-9]{1,64}$/u.test(error.code)) report.failureCode = error.code;
         if (error?.cyberaiCommand) report.commandFailure = error.cyberaiCommand;
+        if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines[target][2] && error.cyberaiCommand.verb === "start") {
+            let socketToken;
+            if (paths?.tokenPath?.startsWith(paths.root + sep)) {
+                const info = await lstat(paths.tokenPath).catch(() => undefined);
+                if (info?.isFile() && !info.isSymbolicLink() && info.size <= 4096) socketToken = (await readFile(paths.tokenPath, "utf8")).trim();
+            }
+            const secrets = [username, password, inferenceToken, socketToken];
+            report.engineStartDiagnostic = { redactionRan: true, beforeAppAndAccountLogin: true, stdout: engineDiagnosticText(error.stdout, secrets), stderr: engineDiagnosticText(error.stderr, secrets) };
+        }
         if (page && !page.isClosed()) report.failureUi = await page.evaluate(() => {
             const login = document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"]');
             const text = login?.textContent ?? "";
@@ -515,7 +544,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             try { report.visibility = await visibilityDone; if (!(report.visibility.systemWindowsMax > 0 && report.visibility.onscreenSamples === 0 && report.visibility.activeSamples === 0 && report.visibility.pids.length === 2)) report.success = false; } catch { report.success = false; }
         }
         if (mounted) await command("/usr/bin/hdiutil", ["detach", mounted]).catch(() => undefined);
-        if (keychainCleanup) { try { await keychainCleanup(); report.keychainRestored = true; } catch { report.success = false; report.errors.push("Owned disposable keychain cleanup failed"); } }
+        if (keychainCleanup) { try { await keychainCleanup(); report.keychainRestored = true; } catch (error) { report.success = false; report.errors.push("Owned disposable keychain cleanup failed"); if (error?.cyberaiCommand) report.keychainCleanupFailure = error.cyberaiCommand; else report.keychainCleanupFailure = { kind: error?.name === "AssertionError" ? "AssertionError" : "native-error" }; } }
         await save();
     }
     assert(report.success && report.videos.length === 2, "Native login acceptance incomplete; inspect redacted cyberai-login.json");
@@ -540,6 +569,10 @@ if (process.argv.includes("--self-test")) {
     assert.equal(missingOwnedKeychainDefaultConfirmed([], [], [missing]), true);
     for (const reads of [[{ ...missing, context: "runner-home" }], [{ ...missing, exitCode: 44 }], [{ ...missing, diagnostic: "Permission denied" }], [missing, missing]]) assert.equal(missingOwnedKeychainDefaultConfirmed([], [], reads), false);
     assert.equal(missingOwnedKeychainDefaultConfirmed([], ["/existing"], [missing]), false);
+    const diagnostic = engineDiagnosticText('error: native engine startup\nAuthorization: Bearer private-token\npassword="private-password"\ntoken=generic-token\nuser=private-user\nsecret=generic-secret\nserver_token=server-value\naccessToken=access-value\nsecretKey=secret-value', ["private-token", "private-password", "private-user"]);
+    assert(diagnostic.includes("native engine startup"));
+    for (const value of ["private-token", "private-password", "private-user", "generic-token", "generic-secret", "Authorization:", "server-value", "access-value", "secret-value", "server_token", "accessToken", "secretKey"]) assert(!diagnostic.includes(value));
+    assert(Buffer.byteLength(engineDiagnosticText("x".repeat(9000), [])) <= 4096);
     assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.125-x64.exe", pin.sha256, 10));
     console.log("Strict artifact pins, redirect refusal, independent RSA refusal and credential environment isolation passed. No app or network used.");
 } else await main();
