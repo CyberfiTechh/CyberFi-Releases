@@ -1,5 +1,23 @@
 [
   {
+    "tag_name": "v0.0.117",
+    "draft": false,
+    "assets": [
+      {
+        "name": "CyberFi-0.0.117-x64.exe",
+        "state": "uploaded"
+      },
+      {
+        "name": "CyberFi-0.0.117-x64.exe.sha256",
+        "state": "uploaded"
+      },
+      {
+        "name": "CyberFi-0.0.117-x64.exe.update.json",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "v0.0.116",
     "draft": false,
     "assets": [
