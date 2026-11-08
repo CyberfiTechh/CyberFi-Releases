@@ -29,6 +29,10 @@ function desktopVersion(value) {
 }
 const UPSTREAM_COMMIT = "c9feffb54cdb3591220dafced4070e118e3d297a";
 const ELECTRON_VERSION = "45.0.0";
+function engineTagAllowed(value) {
+    assert(["v0.4.116", "v0.4.117-preview.1"].includes(value));
+    return value;
+}
 function identifier(value) {
     assert.match(value ?? "", /^[1-9][0-9]*$/);
     return value;
@@ -239,7 +243,10 @@ function selfTest() {
         "release-assets.githubusercontent.com",
     );
     assertVersionOutput("Happy Agent 0.4.116\n", "0.4.116");
-    assertVersionOutput("0.4.117", "0.4.117");
+    assertVersionOutput("Happy Agent 0.4.117-preview.1", "0.4.117-preview.1");
+    assert.equal(engineTagAllowed("v0.4.117-preview.1"), "v0.4.117-preview.1");
+    assert.throws(() => engineTagAllowed("v0.4.117"));
+    assert.throws(() => engineTagAllowed("v0.4.117-preview.2"));
     assert.throws(() => assertVersionOutput("Happy Agent 0.4.116", "0.4.117"));
     assert.throws(() => assertVersionOutput("Happy Agent 0.4.117-dev", "0.4.117"));
     console.log("Released UI verifier pure guard checks passed");
@@ -261,8 +268,7 @@ async function main() {
     assert.equal(process.arch, arch);
     const version = desktopVersion(process.env.DESKTOP_VERSION);
     const desktopTag = "macos-v" + version;
-    const engineTag = process.env.ENGINE_TAG;
-    assert(["v0.4.116", "v0.4.117"].includes(engineTag));
+    const engineTag = engineTagAllowed(process.env.ENGINE_TAG);
     const engineVersion = engineTag.slice(1);
     await mkdir(root); // Fresh owned extraction; never reuse another run's files.
     const evidence = join(root, "evidence");

@@ -31,7 +31,7 @@ on:
                 required: true
             engine_tag:
                 type: choice
-                options: [v0.4.117, v0.4.116]
+                options: [v0.4.117-preview.1, v0.4.116]
                 required: true
 permissions:
     contents: read
