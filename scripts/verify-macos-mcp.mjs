@@ -22,8 +22,19 @@ Object.assign(env, { HOME: home, USERPROFILE: home,
 const { gymElectronProcessRun } = await import(pathToFileURL(join(resolve(upstream),
     "packages/happy-desktop-gym/sources/electron/launch.ts")).href);
 console.log("Fresh isolated MCP runtime:", root);
-const exit = await gymElectronProcessRun({ executablePath: resolve(executable),
-    args: ["--user-data-dir=" + userData], env, timeout: 40 * 60_000 });
+const progress = setInterval(async () => {
+    try {
+        const setup = JSON.parse(await readFile(join(home, ".pdr-kocum-agent/mcp-runtime/setup-report.json"), "utf8"));
+        const calls = await readFile(report, "utf8").then(JSON.parse).catch(() => ({ calls: [] }));
+        console.log(JSON.stringify({ stage: "production-MCP", servers: setup.servers.map(({ name, state }) => ({ name, state })),
+            completedCalls: calls.calls.map(({ name }) => name) }));
+    } catch { /* Preparation has not created its report yet. */ }
+}, 30_000);
+let exit;
+try {
+    exit = await gymElectronProcessRun({ executablePath: resolve(executable),
+        args: ["--user-data-dir=" + userData], env, timeout: 40 * 60_000 });
+} finally { clearInterval(progress); }
 assert.equal(exit.exitCode, 0, exit.output);
 const result = JSON.parse(await readFile(report, "utf8"));
 assert(result.success && result.platform === "darwin" && result.arch === process.arch);
