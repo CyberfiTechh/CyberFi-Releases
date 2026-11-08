@@ -23,7 +23,10 @@ import { spawnSync } from "node:child_process";
 
 const DESKTOP_REPO = "CyberfiTechh/CyberFi-Releases";
 const ENGINE_REPO = "CyberfiTechh/CyberFi-Engine";
-const DESKTOP_TAG = "macos-v0.0.115";
+function desktopVersion(value) {
+    assert(["0.0.115", "0.0.116"].includes(value));
+    return value;
+}
 const UPSTREAM_COMMIT = "c9feffb54cdb3591220dafced4070e118e3d297a";
 const ELECTRON_VERSION = "45.0.0";
 function identifier(value) {
@@ -206,17 +209,20 @@ async function safeResourceLinks(root) {
     }
 }
 function selfTest() {
+    assert.equal(desktopVersion("0.0.115"), "0.0.115");
+    assert.equal(desktopVersion("0.0.116"), "0.0.116");
+    assert.throws(() => desktopVersion("0.0.117"));
     const sha = "a".repeat(64);
     const release = {
         id: 123,
-        tag_name: DESKTOP_TAG,
+        tag_name: "macos-v0.0.115",
         assets: [{ id: 456, name: "CyberFi-0.0.115-x64.dmg", digest: "sha256:" + sha, size: 100 }],
     };
     const ask = {
         releaseId: "123",
         assetId: "456",
         sha,
-        tag: DESKTOP_TAG,
+        tag: "macos-v0.0.115",
         name: "CyberFi-0.0.115-x64.dmg",
     };
     assert.equal(releaseAsset(release, ask).id, 456);
@@ -253,6 +259,8 @@ async function main() {
     const arch = process.env.ARCH;
     assert(arch === "x64" || arch === "arm64");
     assert.equal(process.arch, arch);
+    const version = desktopVersion(process.env.DESKTOP_VERSION);
+    const desktopTag = "macos-v" + version;
     const engineTag = process.env.ENGINE_TAG;
     assert(["v0.4.116", "v0.4.117"].includes(engineTag));
     const engineVersion = engineTag.slice(1);
@@ -270,8 +278,8 @@ async function main() {
             releaseId: process.env.DESKTOP_RELEASE_ID,
             assetId: process.env.DESKTOP_ASSET_ID,
             sha: process.env.DESKTOP_SHA256,
-            tag: DESKTOP_TAG,
-            name: `CyberFi-0.0.115-${arch}.dmg`,
+            tag: desktopTag,
+            name: `CyberFi-${version}-${arch}.dmg`,
         });
         const engineRelease = await apiJson(
             `repos/${ENGINE_REPO}/releases/${identifier(process.env.ENGINE_RELEASE_ID)}`,
@@ -290,7 +298,7 @@ async function main() {
                     desktop: {
                         repo: DESKTOP_REPO,
                         release: desktopRelease.id,
-                        tag: DESKTOP_TAG,
+                        tag: desktopTag,
                         asset: desktopAsset.id,
                         sha256: process.env.DESKTOP_SHA256,
                     },
@@ -335,7 +343,7 @@ async function main() {
                 "Print CFBundleShortVersionString",
                 join(app, "Contents/Info.plist"),
             ]).trim(),
-            "0.0.115",
+            version,
         );
         if (arch === "arm64") command("codesign", ["--verify", "--deep", "--strict", app]);
         const env = cleanEnvironment();
@@ -419,6 +427,7 @@ async function main() {
                 HAPPY_DESKTOP_ELECTRON_EXECUTABLE: stockExecutable,
                 HAPPY_DESKTOP_AGENT_EXECUTABLE: engine,
                 CYBERFI_RELEASED_RESOURCES: resources,
+                CYBERFI_QA_FIXTURES: join(dirname(fileURLToPath(import.meta.url)), "fixtures"),
             },
             log: join(evidence, "compiled-ui-harness.log"),
         });

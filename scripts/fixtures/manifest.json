@@ -1,0 +1,17 @@
+[
+  {
+    "name": "qa-support.png",
+    "size": 1803,
+    "sha256": "17324376b497700342ca712169a62e75afe59cc921c16a4daad3599937aed36d"
+  },
+  {
+    "name": "qa-support.pdf",
+    "size": 2967,
+    "sha256": "112f67a43383ab59f003e7acfdc44b7ed424b2044dadde542c61a1d1de23b84a"
+  },
+  {
+    "name": "qa-support.docx",
+    "size": 36658,
+    "sha256": "ac1a536418ae9b7f03b358100350c515d9eb91155e1c3953fa12ac23fd7c4551"
+  }
+]

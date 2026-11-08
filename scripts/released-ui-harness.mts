@@ -1,5 +1,6 @@
 import { happyAgentClientCreate } from "../packages/happy-desktop-gym/sources/electron/happyAgentProtocol.ts";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
 import { mkdir, writeFile, readFile, cp, realpath } from "node:fs/promises";
@@ -61,6 +62,18 @@ await inferenceBase.start();
 let syntheticCalls = 0;
 const diagram =
     '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220" viewBox="0 0 400 220"><path d="M40 185 L200 30 L360 185 Z" fill="#d8f4ed" stroke="#126d60" stroke-width="3"/><text x="195" y="22">A</text><text x="20" y="205">B</text><text x="365" y="205">C</text></svg>';
+const fixtureRoot = process.env.CYBERFI_QA_FIXTURES;
+assert.ok(fixtureRoot, "Pinned synthetic output fixtures are required");
+const fixtureManifest = JSON.parse(await readFile(join(fixtureRoot, "manifest.json"), "utf8"));
+assert.deepEqual(fixtureManifest.map((item: any) => item.name).sort(), ["qa-support.docx", "qa-support.pdf", "qa-support.png"]);
+const outputFixtures = await Promise.all(fixtureManifest.map(async (item: any) => {
+    assert.match(item.name, /^qa-support\.(png|pdf|docx)$/);
+    const bytes = await readFile(join(fixtureRoot, item.name));
+    assert.equal(bytes.length, item.size);
+    assert.equal(createHash("sha256").update(bytes).digest("hex"), item.sha256);
+    return { ...item, bytes };
+}));
+const presentedPaths = ["qa-diagram.svg", ...outputFixtures.map((item: any) => item.name)];
 const synthetic = createServer(async (req, res) => {
     for await (const _ of req) {
     }
@@ -71,7 +84,7 @@ const synthetic = createServer(async (req, res) => {
                   {
                       type: "toolCall",
                       name: "present_files",
-                      arguments: { filepaths: ["qa-diagram.svg"] },
+                      arguments: { filepaths: presentedPaths },
                   },
               ]
             : [
@@ -330,6 +343,10 @@ try {
             content: Buffer.from(diagram).toString("base64"),
             expectedHash: null,
         });
+        for (const item of outputFixtures) await api.writeFile(bot.workspaceId, {
+            path: item.name, content: item.bytes.toString("base64"), expectedHash: null,
+        });
+        report.outputFixtureManifest = fixtureManifest;
         report.syntheticSource = { agentId: bot.agent.id, workspaceId: bot.workspaceId };
         const input = page.getByRole("textbox").first();
         await input.fill("Test: üçgenin açılarını kısa açıkla ve yalnız yardımcı şekli göster.");
@@ -502,6 +519,69 @@ try {
             "Outputs source labels are Turkish",
         );
         return { nativePresentedOutputVisible: true, sourceLabelsTurkish: true };
+    });
+    await run("all presented files have shared registry records without refresh", async () => {
+        const api = happyAgentClientCreate(runtime.socketPath, runtime.token);
+        const registry = (await api.getArtifact("ocyberfioutputsregistry01")).artifact;
+        const file = await api.getArtifactFile(registry.id, registry.latestVersion, "index.md");
+        assert.ok(file);
+        const records = JSON.parse(new TextDecoder().decode(file.data)).outputs;
+        report.sharedOutputRecords = [];
+        for (const name of presentedPaths) {
+            const record = records.find((item: any) => item.name === name);
+            assert.ok(record, `Missing shared output record: ${name}`);
+            assert.match(record.artifactId, /^[a-z0-9]+$/);
+            const actual = (await api.getArtifact(record.artifactId)).artifact;
+            assert.equal(actual.id, record.artifactId);
+            const expectedHash = name === "qa-diagram.svg"
+                ? createHash("sha256").update(diagram).digest("hex")
+                : outputFixtures.find((item: any) => item.name === name).sha256;
+            assert.equal(record.sha256, expectedHash);
+            const version = (await api.getArtifactVersion(actual.id, actual.latestVersion)).version;
+            assert.ok(version.files.some((file: any) => file.sha256 === expectedHash), "Stored output version retains exact fixture bytes");
+            report.sharedOutputRecords.push({ name, artifactId: actual.id, sha256: record.sha256 });
+            await page.getByRole("searchbox", { name: "Çıktılarda ara" }).fill(name);
+            await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20000 });
+        }
+        return { records: report.sharedOutputRecords, noRefresh: true };
+    });
+    await run("PNG and PDF open while Office offers honest file download", async () => {
+        const open = async (name: string) => {
+            await page.getByRole("searchbox", { name: "Çıktılarda ara" }).fill(name);
+            await page.locator('[data-happy-desktop-ui="happy-agent-artifact-row"]').filter({ hasText: name }).first().click();
+        };
+        const captureOutput = async (name: string) => {
+            await gymElectronInvisibleAssert(app);
+            const png = await app.evaluate(async ({ BrowserWindow }: any) =>
+                (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true })).toPNG().toString("base64"));
+            await writeFile(resolve(`.context/cyberfi-115-integrated-output-${name}.png`), Buffer.from(png, "base64"));
+        };
+        await open("qa-support.png");
+        await page.waitForFunction(() => Array.from(document.images).some(image => image.naturalWidth === 400 && image.naturalHeight === 220 && image.closest('[data-happy-desktop-ui="happy-agent-artifact-viewer"]')));
+        await open("qa-support.pdf");
+        const pdf = page.locator('iframe[data-happy-desktop-ui="happy-agent-artifact-document"]').first();
+        await pdf.waitFor();
+        const pdfEvidence = await pdf.evaluate(async (frame: HTMLIFrameElement) => {
+            const url = frame.src;
+            const response = await fetch(url);
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            const loaded = await new Promise<boolean>(resolve => {
+                const timer = setTimeout(() => resolve(false), 15000);
+                frame.addEventListener("load", () => { clearTimeout(timer); resolve(true); }, { once: true });
+                frame.src = url;
+            });
+            return { loaded, status: response.status, signature: new TextDecoder().decode(bytes.slice(0, 5)), bytes: bytes.length };
+        });
+        assert.equal(pdfEvidence.loaded, true, "Native PDF frame emits load");
+        assert.equal(pdfEvidence.status, 200);
+        assert.equal(pdfEvidence.signature, "%PDF-");
+        assert.equal(pdfEvidence.bytes, outputFixtures.find((item: any) => item.name === "qa-support.pdf").size);
+        await captureOutput("pdf");
+        await open("qa-support.docx");
+        await page.getByRole("button", { name: "İndir", exact: true }).first().waitFor();
+        await captureOutput("docx");
+        report.outputPreviewEvidence = { png400x220: true, pdf: { ...pdfEvidence, readablePageVisuallyVerified: false, screenshot: "cyberfi-115-integrated-output-pdf.png" }, officeDownloadOffered: true, officeEditingTested: false, officeScreenshot: "cyberfi-115-integrated-output-docx.png" };
+        return report.outputPreviewEvidence;
     });
     report.limits = ["Model response is deterministic test provider; no live vendor/model called."];
 } catch (e) {
