@@ -8,6 +8,10 @@ on:
                 type: boolean
                 default: false
                 description: Actual signed116 GUI button/download/app-own installer handoff to117
+            in_app_rollback_120:
+                type: boolean
+                default: false
+                description: Actual signed120 GUI download and automatic reopen of published118 (rollback, not forward upgrade)
             target_version:
                 type: choice
                 options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120"]
@@ -26,9 +30,10 @@ jobs:
         runs-on: windows-2025
         env:
             IN_APP_UPDATE: ${{ inputs.in_app_update }}
+            IN_APP_ROLLBACK_120: ${{ inputs.in_app_rollback_120 }}
             TARGET_VERSION: ${{ inputs.target_version || '0.0.115' }}
             TARGET_SHA256: ${{ inputs.target_sha256 }}
-        timeout-minutes: ${{ inputs.in_app_update && 30 || 20 }}
+        timeout-minutes: ${{ (inputs.in_app_update || inputs.in_app_rollback_120) && 30 || 20 }}
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
               with:
@@ -51,17 +56,21 @@ jobs:
               working-directory: upstream
               run: pnpm install --frozen-lockfile --ignore-scripts
             - name: Install mandatory video encoder from the locked public gym dependency
-              if: inputs.in_app_update
+              if: inputs.in_app_update || inputs.in_app_rollback_120
               working-directory: upstream
               run: pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
             - name: Self-check the acceptance harness
               shell: pwsh
-              run: ./acceptance/scripts/verify-windows.ps1 -SelfCheck
+              run: |
+                  ./acceptance/scripts/verify-windows.ps1 -SelfCheck
+                  ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -InApp117 -TargetVersion '0.0.117' -TargetSha256 '25b07164a17e77516f9dcfc978f784510e47a2af86fdf3e7dfa539322bdaa1f4'
+                  ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -InApp120 -TargetVersion '0.0.118' -TargetSha256 '5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381'
             - name: Install previous release and verify target automatic relaunch
               shell: pwsh
               run: |
                   $params = @{ Upgrade115 = $true; TargetVersion = $env:TARGET_VERSION; TargetSha256 = $env:TARGET_SHA256; UpstreamPath = "$env:GITHUB_WORKSPACE/upstream" }
                   if ($env:IN_APP_UPDATE -eq 'true') { $params.InApp117 = $true }
+                  if ($env:IN_APP_ROLLBACK_120 -eq 'true') { $params.InApp120 = $true }
                   ./acceptance/scripts/verify-windows.ps1 @params
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()

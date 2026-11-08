@@ -560,12 +560,24 @@ try {
             const expected =
                 "Üçgenin iç açıları toplamı 180 derecedir. İki açı 50 derece olduğunda üçüncü açı 80 derecedir. Şekil yalnızca açıklamayı destekler.";
             const button = page.locator('[data-happy-desktop-ui="turn-summary-copy"]').last();
-            await button.click();
-            await page.waitForTimeout(150);
-            assert.equal(
-                await app.evaluate(({ clipboard }: any) => clipboard.readText()),
-                expected,
-            );
+            const copyAndRead = async (label: string, expectedText: string) => {
+                const selectionBefore = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+                const started = Date.now();
+                await button.click();
+                const selectionAfterClick = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+                let actual: string;
+                let attempts = 0;
+                do {
+                    actual = await app.evaluate(({ clipboard }: any) => clipboard.readText());
+                    attempts++;
+                    if (actual === expectedText || Date.now() - started >= 5000) break;
+                    await nodeDelay(50);
+                } while (true);
+                (report.clipboardChecks ??= []).push({ label, expected: expectedText, actual,
+                    selectionBefore, selectionAfterClick, elapsedMs: Date.now() - started, attempts });
+                assert.equal(actual, expectedText);
+            };
+            await copyAndRead("final output", expected);
             const selected = await page.evaluate(() => {
                 const paragraph = Array.from(document.querySelectorAll("p")).find((p) =>
                     p.textContent?.startsWith("Üçgenin iç açıları toplamı"),
@@ -578,12 +590,8 @@ try {
                 selection.addRange(range);
                 return selection.toString();
             });
-            await button.click();
-            await page.waitForTimeout(150);
-            assert.equal(
-                await app.evaluate(({ clipboard }: any) => clipboard.readText()),
-                selected,
-            );
+            assert.equal(selected, "Üçgenin");
+            await copyAndRead("selected text", selected);
             await page.evaluate(() => window.getSelection()?.removeAllRanges());
             return { nativeClipboardReadback: true, finalOnly: true, selectedOnly: true };
         },

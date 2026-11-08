@@ -20,7 +20,18 @@ const evidence = join(root, "evidence");
 const executable = resolve(process.env.ACCEPTANCE_EXE);
 const userData = resolve(process.env.ACCEPTANCE_USER_DATA);
 assert(executable.startsWith(root + sep));
-const report = { success: false, mode: "actual signed116 GUI updater to117", phase: "capability", progress: [], processes: [], errors: [] };
+const fromVersion = process.env.ACCEPTANCE_SOURCE_VERSION;
+const toVersion = process.env.ACCEPTANCE_TARGET_VERSION;
+const targetSize = Number(process.env.ACCEPTANCE_TARGET_SIZE);
+const rollback = fromVersion === "0.0.120" && toVersion === "0.0.118";
+assert(rollback || (fromVersion === "0.0.116" && toVersion === "0.0.117"), "Only the two pinned GUI scenarios are allowed");
+assert.equal(process.env.ACCEPTANCE_TARGET_SHA256, rollback
+    ? "5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381"
+    : "25b07164a17e77516f9dcfc978f784510e47a2af86fdf3e7dfa539322bdaa1f4");
+assert.equal(targetSize, rollback ? 143681400 : 143680592);
+const installerName = `CyberFi-${toVersion}-x64.exe`;
+const report = { success: false, mode: `actual signed${fromVersion} GUI installer to${toVersion}`, rollback,
+    forwardUpgradeTested: false, phase: "capability", progress: [], processes: [], errors: [] };
 const save = () => writeFile(join(evidence, "in-app-update.json"), JSON.stringify(report, null, 2));
 const gymPath = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
 const { gymElectronProcessRun, gymElectronVideoRecord } = await import(gymPath("launch"));
@@ -42,7 +53,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/T
 const ps = join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
 async function processes() {
     const { stdout } = await exec(ps, ["-NoProfile", "-NonInteractive", "-Command",
-        "@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe','CyberFi-0.0.117-x64.exe') } | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Depth 3 -Compress"],
+        `@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe','${installerName}') } | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Depth 3 -Compress`],
         { timeout: 15000, windowsHide: true, env, maxBuffer: 256 * 1024 });
     const parsed = stdout.trim() ? JSON.parse(stdout) : [];
     return Array.isArray(parsed) ? parsed : [parsed];
@@ -130,16 +141,16 @@ try {
     const deadline = Date.now() + 90000;
     let targets;
     while (Date.now() < deadline) {
-        if (runError || runResult) throw runError ?? new Error(`116 exited before CDP capability: ${runResult.output}`);
+        if (runError || runResult) throw runError ?? new Error(`${fromVersion} exited before CDP capability: ${runResult.output}`);
         try { const response = await fetch(endpoint + "/json/list", { signal: AbortSignal.timeout(1500) });
             if (response.ok) { targets = await response.json(); if (targets.some(target => target.type === "page")) break; } } catch { /* Only loopback startup polling. */ }
         await delay(300);
     }
-    assert(targets?.some(target => target.type === "page"), "Approved signed116 --debug did not expose a renderer CDP page");
+    assert(targets?.some(target => target.type === "page"), `Approved signed${fromVersion} --debug did not expose a renderer CDP page`);
     report.approvedDebug = { endpoint, rawInspectorArgumentsUsed: false, fuseChanges: false };
     browser = await chromium.connectOverCDP(endpoint);
     page = browser.contexts().flatMap(context => context.pages()).find(candidate => !candidate.url().startsWith("devtools:"));
-    assert(page, "No actual116 renderer page");
+    assert(page, `No actual${fromVersion} renderer page`);
     await page.waitForFunction(() => typeof window.happyDesktop?.runtimeGet === "function", undefined, { timeout: 30000 });
     video = await gymElectronVideoRecord(page, { path: join(evidence, "in-app-update.webm"), fps: 5 });
     // One legitimate main-origin preference write; never a persistent frame init script.
@@ -150,7 +161,7 @@ try {
     await page.reload({ waitUntil: "commit" });
     await page.waitForFunction(() => typeof window.happyDesktop?.runtimeGet === "function", undefined, { timeout: 30000 });
     const before = (await processes()).filter(item => item.ExecutablePath?.toLowerCase() === executable.toLowerCase() && !item.CommandLine?.includes("--type="));
-    assert.equal(before.length, 1, "One owned116 main process required");
+    assert.equal(before.length, 1, `One owned${fromVersion} main process required`);
     report.oldMainProcessId = before[0].ProcessId;
     const { stdout: nativeText } = await exec(ps, ["-NoProfile", "-NonInteractive", "-Command",
         `Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class UpdateProbe{[DllImport("user32.dll")]public static extern bool IsWindowVisible(IntPtr h);[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);}';$p=Get-Process -Id ${report.oldMainProcessId};[uint32]$fg=0;$null=[UpdateProbe]::GetWindowThreadProcessId([UpdateProbe]::GetForegroundWindow(),[ref]$fg);$listener=Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort ${port} -State Listen;@{visible=($p.MainWindowHandle -ne 0 -and [UpdateProbe]::IsWindowVisible($p.MainWindowHandle));foregroundPid=$fg;listenerPids=@($listener.OwningProcess)}|ConvertTo-Json -Compress`],
@@ -158,7 +169,7 @@ try {
     report.nativeHiddenCapability = JSON.parse(nativeText);
     assert.equal(report.nativeHiddenCapability.visible, false);
     assert.notEqual(report.nativeHiddenCapability.foregroundPid, report.oldMainProcessId);
-    assert(report.nativeHiddenCapability.listenerPids.includes(report.oldMainProcessId), "Loopback CDP listener is not owned by signed116 process");
+    assert(report.nativeHiddenCapability.listenerPids.includes(report.oldMainProcessId), `Loopback CDP listener is not owned by signed${fromVersion} process`);
     const readyBy = Date.now() + 90000;
     let startedLocally = false;
     while (Date.now() < readyBy) {
@@ -184,19 +195,27 @@ try {
     catch {
         report.capabilityDom = await page.locator("body").innerText();
         await page.screenshot({ path: join(evidence, "ui-capability-blocked.png") });
-        throw new Error("Real signed116 General settings updater was not reachable; no runtime spoof or direct IPC fallback used");
+        throw new Error(`Real signed${fromVersion} General settings updater was not reachable; no runtime spoof or direct IPC fallback used`);
     }
     report.phase = "real updater";
     await page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/i }).first().click();
-    await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(entry => entry.version === "0.0.117"), undefined, { timeout: 45000 });
-    await select.selectOption("0.0.117");
-    const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç)$/i });
+    await page.waitForFunction(async version => {
+        const update = (await window.happyDesktop.runtimeGet()).update;
+        return ["idle", "available"].includes(update?.status) && update.versions?.some(entry => entry.version === version);
+    }, toVersion, { timeout: 45000 });
+    await select.selectOption(toVersion);
+    await page.waitForFunction(async version => {
+        const update = (await window.happyDesktop.runtimeGet()).update;
+        return update?.status === "available" && update.availableVersion === version;
+    }, toVersion, { timeout: 15000 });
+    report.selectedPublishedVersion = toVersion;
+    const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/i });
     await button.waitFor({ state: "visible", timeout: 15000 });
     await page.screenshot({ path: join(evidence, "before-real-download.png") });
     watch = Promise.all([
         (async () => {
             while (!stopWatch) {
-                report.processes.push(...(await processes()).filter(item => item.Name === "CyberFi-0.0.117-x64.exe"));
+                report.processes.push(...(await processes()).filter(item => item.Name === installerName));
                 await delay(300);
             }
         })(),
@@ -218,6 +237,13 @@ try {
     watch.catch(() => undefined);
     report.clickedActualGuiButton = true;
     await button.click();
+    const completedBy = Date.now() + 10 * 60_000;
+    while (!runResult && !runError && Date.now() < completedBy) {
+        const failure = report.progress.find(update => update.status === "error");
+        assert(!failure, `Actual GUI downloader failed: ${failure?.message}`);
+        await delay(250);
+    }
+    assert(runResult || runError, "Actual GUI downloader/handoff exceeded its bounded deadline");
     await run;
     assert(!runError && runResult?.exitCode === 0, runError?.message ?? runResult?.output);
     const until = Date.now() + 30000;
@@ -232,7 +258,7 @@ try {
     const digest = createHash("sha256");
     for await (const chunk of createReadStream(installer.ExecutablePath)) digest.update(chunk);
     assert.equal(digest.digest("hex"), process.env.ACCEPTANCE_TARGET_SHA256);
-    assert.equal(bytes.size, 143680592);
+    assert.equal(bytes.size, targetSize);
     assert(report.progress.some(update => update.status === "downloading"), "Real runtime download progress was not observed");
     const fractions = report.progress.filter(update => typeof update.downloadedFraction === "number").map(update => update.downloadedFraction);
     assert(fractions.length > 0 && fractions.every(value => Number.isFinite(value) && value >= 0 && value <= 1) && fractions.some(value => value > 0),
@@ -240,8 +266,9 @@ try {
     report.ownInstaller = installer;
     report.appDownloadedSHA256 = process.env.ACCEPTANCE_TARGET_SHA256;
     report.appDownloadedSize = bytes.size;
+    report.forwardUpgradeTested = !rollback;
     report.success = true;
-    report.phase = "app-own installer handoff observed; outer harness verifies automatic117/profile";
+    report.phase = `app-own installer handoff observed; outer harness verifies automatic${toVersion}/profile${rollback ? " (explicit rollback)" : ""}`;
 } catch (error) {
     report.errors.push(String(error));
     if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "in-app-failure.png") }).catch(() => {});
@@ -255,7 +282,7 @@ try {
         report.errors.push("Mandatory gym compositor video missing");
     }
     await save();
-    // On a capability failure, ask the owned116 app to quit; never start117 manually.
+    // Ask only the owned app to quit on failure; never launch the target manually.
     if (!report.success && page && !page.isClosed()) await page.evaluate(() => window.happyDesktop.windowClose?.()).catch(() => {});
     if (!report.success) {
         for (const item of (await processes()).filter(item => item.ExecutablePath?.toLowerCase() === executable.toLowerCase()))

@@ -1,4 +1,4 @@
-param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [switch]$InApp120, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
@@ -9,6 +9,7 @@ $expected = @{
     '0.0.116' = '63b302d6974e233d317af0f14950acb8449b16e3be1f83df1ce9782e385e4dde'
     '0.0.117' = '25b07164a17e77516f9dcfc978f784510e47a2af86fdf3e7dfa539322bdaa1f4'
     '0.0.118' = '5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381'
+    '0.0.120' = '3946c0f512ebe8f1cce8017c80734dfa2aa5d587898bb5bd2e5f550f786735e8'
 }
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 if ($TargetVersion -eq '0.0.117') {
@@ -17,12 +18,18 @@ if ($TargetVersion -eq '0.0.117') {
 }
 if ($TargetVersion -in @('0.0.118','0.0.119','0.0.120')) {
     Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '118/119 require an explicit immutable published installer digest'
-    $expected[$TargetVersion] = $TargetSha256
+    if ($expected.ContainsKey($TargetVersion)) {
+        Assert-True ($TargetSha256 -ceq $expected[$TargetVersion]) 'Published immutable digest changed'
+    } else { $expected[$TargetVersion] = $TargetSha256 }
 }
 
 if ($InApp117) {
-    Assert-True ($Upgrade115 -and -not $Mcp115 -and $TargetVersion -eq '0.0.117') 'In-app GUI mode is only the bounded116-to117 upgrade'
+    Assert-True ($Upgrade115 -and -not $Mcp115 -and -not $InApp120 -and $TargetVersion -eq '0.0.117') 'In-app GUI mode is only the bounded116-to117 upgrade'
 }
+if ($InApp120) {
+    Assert-True ($Upgrade115 -and -not $Mcp115 -and -not $InApp117 -and $TargetVersion -eq '0.0.118') 'Current120 GUI mode only permits the explicit published118 rollback'
+}
+$inApp = $InApp117 -or $InApp120
 function Get-UpgradeSource([string]$Target) {
     switch ($Target) {
         '0.0.115' { '0.0.114' }
@@ -59,8 +66,9 @@ if ($SelfCheck) {
     Assert-True ((Get-UpgradeSource '0.0.119') -eq '0.0.118') '119 source must be118'
     Assert-True ((Get-UpgradeSource '0.0.120') -eq '0.0.118') '120 source must remain the published118;119 is an unpublished candidate'
 
-    Assert-True ($expected.Count -in @(6, 7)) 'Only immutable pinned versions allowed'
+    Assert-True ($expected.Count -in @(7, 8)) 'Only immutable pinned versions allowed'
     Assert-True ($expected.ContainsKey((Get-UpgradeSource $TargetVersion))) 'Upgrade baseline must have an immutable installer digest'
+    Assert-True ($expected.ContainsKey('0.0.120') -and $expected.ContainsKey('0.0.118')) 'Current GUI rollback requires both immutable installer pins'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
         Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118', '0.0.119', '0.0.120')) 'Unexpected version'
@@ -74,7 +82,7 @@ if ($SelfCheck) {
 }
 Assert-True ($IsWindows -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted' -and
     $env:GITHUB_REPOSITORY -ceq $repo -and $env:GITHUB_REF -eq 'refs/heads/main') 'Only the disposable public Windows runner may install'
-$fromVersion = $(if ($Upgrade115) { Get-UpgradeSource $TargetVersion } else { '0.0.113' })
+$fromVersion = $(if ($InApp120) { '0.0.120' } elseif ($Upgrade115) { Get-UpgradeSource $TargetVersion } else { '0.0.113' })
 $toVersion = $(if ($Upgrade115) { $TargetVersion } else { '0.0.114' })
 $versions = $(if ($Mcp115) { @($TargetVersion) } else { @($fromVersion, $toVersion) })
 $rootName = $(if ($Mcp115) { ('cyberfi-windows-mcp-' + $TargetVersion.Replace('0.0.', '')) } elseif ($Upgrade115) { ('cyberfi-windows-upgrade-' + $TargetVersion.Replace('0.0.', '')) } else { 'cyberfi-windows-acceptance' })
@@ -187,6 +195,7 @@ function Assert-Smoke([string]$Path) {
 }
 
 $installers = @{}
+$verifiedSizes = @{}
 foreach ($version in $versions) {
     $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/v$version" -Headers @{ Accept = 'application/vnd.github+json' } -TimeoutSec 30
     Assert-True (-not $release.draft -and $release.tag_name -ceq "v$version") 'Expected an actual published release'
@@ -235,6 +244,7 @@ foreach ($version in $versions) {
     $payloadHashes[$version] = Read-VerifiedPayloadHash $path $version
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence "manifest-$version.json") -Encoding utf8
     $installers[$version] = $path
+    $verifiedSizes[$version] = $manifest.size
 }
 
 # No token is inherited by the installer or its automatically relaunched app.
@@ -292,7 +302,7 @@ assert.equal(result.exitCode, 0, result.output);
     'Signed packaged target production MCP bootstrap and nine representative tool calls passed.'
     return
 }
-if ($InApp117) {
+if ($inApp) {
     $engineRoot = Assert-Owned (Join-Path $root 'owned-engine') $root
     New-Item -ItemType Directory -Path $engineRoot | Out-Null
     $archive = Join-Path $engineRoot 'engine.tar.gz'
@@ -348,13 +358,16 @@ $env:HAPPY_DESKTOP_SMOKE_SCREENSHOT = Join-Path $evidence "automatic-relaunch-$t
 $started = Get-Date
 # These are the production updater's exact NSIS arguments; no manual 114 app launch follows.
 $installerExitCode = $null
-if ($InApp117) {
+if ($inApp) {
     $env:ACCEPTANCE_UI_ROOT = $root
+    $env:ACCEPTANCE_SOURCE_VERSION = $fromVersion
+    $env:ACCEPTANCE_TARGET_VERSION = $toVersion
     $env:ACCEPTANCE_TARGET_SHA256 = $expected[$toVersion]
+    $env:ACCEPTANCE_TARGET_SIZE = [string]$verifiedSizes[$toVersion]
     Push-Location $UpstreamPath
     try {
         & node --import tsx (Join-Path $PSScriptRoot 'verify-windows-app-update.mjs') $UpstreamPath
-        Assert-True ($LASTEXITCODE -eq 0) 'Actual signed116 GUI updater capability or real download/handoff failed'
+        Assert-True ($LASTEXITCODE -eq 0) "Actual signed$fromVersion GUI downloader or app-own installer handoff to$toVersion failed"
     } finally { Pop-Location }
     $uiReport = Get-Content (Join-Path $evidence 'in-app-update.json') -Raw | ConvertFrom-Json
     Assert-True ($uiReport.success -and $uiReport.clickedActualGuiButton -and $uiReport.video.framesReceived -gt 0) 'Actual GUI/video proof missing'
@@ -413,7 +426,7 @@ foreach ($path in $preserve) {
         $prefix = [byte[]]::new($mcpOriginalLength)
         [Array]::Copy($bytes, $prefix, $prefix.Length)
         Assert-True ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($prefix)) -ceq $hashes[$path]) 'Existing MCP bytes changed; only appended defaults are allowed'
-    } elseif ($InApp117 -and $path -eq $settings) {
+    } elseif ($inApp -and $path -eq $settings) {
         # Normal GUI navigation may persist other configuration fields.
         $retained = Get-Content $settings -Raw | ConvertFrom-Json
         Assert-True ($retained.appearance -eq 'dark' -and $retained.defaultPermissionMode -eq 'read_only') 'Selected real GUI preferences changed'
@@ -425,7 +438,7 @@ if ($hiddenRelaunch) { Assert-True ((Get-Item $env:HAPPY_DESKTOP_SMOKE_REPORT).L
 [ordered]@{ status = 'PASS'; fresh = $before; upgraded = $after; automaticRelaunch = $true;
     hiddenWindowsVerified = $hiddenRelaunch; nativeAutomaticWindow = $nativeWindowEvidence;
     preservedFiles = $preserve; existingMcpBytesPreserved = $true; installerArguments = '--updated /S --force-run';
-    applicationUpdaterDownloadUiTested = [bool]$InApp117;
-    note = $(if ($InApp117) { 'Actual signed116 General-settings button/download/app-own installer handoff observed; outer harness verifies automatic117 and selected profile data.' } else { 'Released installer path tested; app download/button/feed path is a separate test.' })
+    applicationUpdaterDownloadUiTested = [bool]$inApp; rollback = [bool]$InApp120;
+    note = $(if ($InApp120) { 'Actual signed120 UI download/verification/app-own installer handoff to published118 and automatic reopening tested as an explicit rollback; no forward120 upgrade claim.' } elseif ($InApp117) { 'Actual signed116 General-settings button/download/app-own installer handoff observed; outer harness verifies automatic117 and selected profile data.' } else { 'Released installer path tested; app download/button/feed path is a separate test.' })
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'result.json') -Encoding utf8
-"Real released $fromVersion install -> $toVersion silent upgrade and automatic relaunch passed."
+"Real released $fromVersion install -> $toVersion silent replacement and automatic relaunch passed (rollback: $([bool]$InApp120))."

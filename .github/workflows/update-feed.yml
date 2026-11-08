@@ -37,7 +37,7 @@ jobs:
                       and re.fullmatch(r"(?:macos-)?v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", release.get("tag_name", ""))]
                   releases.sort(key=lambda release: (release["published_at"], release["id"]), reverse=True)
                   index = [{"tag_name": release["tag_name"], "draft": False, "assets": [
-                      {"name": asset["name"], "state": "uploaded"} for asset in release.get("assets", [])
+                      {"id": asset["id"], "name": asset["name"], "state": "uploaded"} for asset in release.get("assets", [])
                       if asset.get("state") == "uploaded" and re.fullmatch(
                           r"CyberFi-\d+\.\d+\.\d+-(?:x64|arm64)\.(?:exe|dmg)(?:\.(?:update\.json|sha256|verification\.json))?", asset.get("name", ""))
                   ]} for release in releases[:30]]
