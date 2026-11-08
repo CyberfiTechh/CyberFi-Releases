@@ -73,6 +73,8 @@ jobs:
                   ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -InApp121 -TargetVersion '0.0.120' -TargetSha256 '3946c0f512ebe8f1cce8017c80734dfa2aa5d587898bb5bd2e5f550f786735e8'
                   ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -TargetVersion '0.0.121' -TargetSha256 'caff2c0b37b14088e10daa29c268bf34da2de87d97b7d8bb85d1b62c9abc637a'
             - name: Install previous release and verify target automatic relaunch
+              env:
+                  GH_TOKEN: ${{ github.token }}
               shell: pwsh
               run: |
                   $params = @{ Upgrade115 = $true; TargetVersion = $env:TARGET_VERSION; TargetSha256 = $env:TARGET_SHA256; UpstreamPath = "$env:GITHUB_WORKSPACE/upstream" }

@@ -49,6 +49,8 @@ jobs:
               shell: pwsh
               run: ./acceptance/scripts/verify-windows.ps1 -SelfCheck
             - name: Verify signed target payload and run nine production MCP calls
+              env:
+                  GH_TOKEN: ${{ github.token }}
               shell: pwsh
               run: ./acceptance/scripts/verify-windows.ps1 -Mcp115 -TargetVersion "$env:TARGET_VERSION" -TargetSha256 "$env:TARGET_SHA256" -UpstreamPath "$env:GITHUB_WORKSPACE/upstream"
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

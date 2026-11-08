@@ -50,6 +50,13 @@ function Get-UpgradeSource([string]$Target) {
 function Receive-PublishedAsset([string]$Url, [string]$Destination, [long]$AssetId, [ValidateSet("CyberFi-Releases", "CyberFi-Engine")][string]$Repository = "CyberFi-Releases") {
     Assert-True ($AssetId -gt 0) 'A published numeric asset identity is required'
     Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloading $([IO.Path]::GetFileName($Destination))"
+    if ($env:GH_TOKEN) {
+        Assert-True ($PSVersionTable.PSVersion -ge [version]'7.4') 'Native asset redirection must preserve binary bytes'
+        & gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/$Repository/releases/assets/$AssetId" > $Destination
+        Assert-True ($LASTEXITCODE -eq 0) 'Exact authenticated acceptance asset download failed'
+        Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloaded $((Get-Item -LiteralPath $Destination).Length) bytes"
+        return
+    }
     & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 300 --output $Destination $Url
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Primary GitHub download failed; trying the same pinned asset through the official public API ($AssetId)."
