@@ -6,7 +6,7 @@ on:
         inputs:
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121", "0.0.122"]
+                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121", "0.0.122", "0.0.128"]
                 default: "0.0.115"
             architecture:
                 type: choice
@@ -70,14 +70,50 @@ jobs:
               run: |
                   set -euo pipefail
                   [[ "$RELEASE_ID" =~ ^[0-9]+$ && "$ASSET_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
-                  case "$TARGET_VERSION" in 0.0.115|0.0.116|0.0.117|0.0.118|0.0.119|0.0.120|0.0.121|0.0.122) ;; *) exit 1 ;; esac
+                  case "$TARGET_VERSION" in 0.0.115|0.0.116|0.0.117|0.0.118|0.0.119|0.0.120|0.0.121|0.0.122|0.0.128) ;; *) exit 1 ;; esac
                   case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
                   test "$(uname -m)" = "$native"
+                  filename="CyberFi-$TARGET_VERSION-$ARCH.dmg"
+                  if [ "$TARGET_VERSION" = 0.0.128 ]; then
+                    test "$DERIVED_ACCESSORY_CONTAINER" = false
+                    case "$ARCH" in
+                      x64)
+                        test "$EXPECTED_SHA" = 64eaabf230b543d0f4fbc6d47f9a3fa1f53e1ed0683933dc00f9b4b7b26fdc4b
+                        manifest_sha=1de28376bd03ff2e77dd152ff99b116c79b8be47268a0cf09b9f503c828e5668 ;;
+                      arm64)
+                        test "$EXPECTED_SHA" = 912ca67da780976478213c63f709b4499eabb590d17f32c5c2603368d8617664
+                        manifest_sha=1e92a7767ee7c00e91d198c45622b99e6744240ffa5182992ffa7773754f48d0 ;;
+                    esac
+                  fi
                   gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" > "$RUNNER_TEMP/release.json"
-                  jq -e --argjson id "$ASSET_ID" --arg sha "sha256:$EXPECTED_SHA" --arg name "CyberFi-$TARGET_VERSION-$ARCH.dmg" --arg tag "macos-v$TARGET_VERSION" \
+                  jq -e --argjson id "$ASSET_ID" --arg sha "sha256:$EXPECTED_SHA" --arg name "$filename" --arg tag "macos-v$TARGET_VERSION" \
                     '.tag_name == $tag and any(.assets[]; .id == $id and .digest == $sha and .name == $name)' "$RUNNER_TEMP/release.json"
+                  if [ "$TARGET_VERSION" = 0.0.128 ]; then
+                    manifest_id="$(jq -er --arg name "$filename.update.json" --arg digest "sha256:$manifest_sha" \
+                      --arg source "Kaynak: https://github.com/CyberfiTechh/CyberFi/commit/a90b7531455ad651cd0b2667cf40a4d37aaf84e3" \
+                      'select(.draft == false and (.body | contains($source))) |
+                       [.assets[] | select(.name == $name and .state == "uploaded" and .digest == $digest and .size <= 4096)] |
+                       select(length == 1) | .[0].id' "$RUNNER_TEMP/release.json")"
+                    [[ "$manifest_id" =~ ^[0-9]+$ ]]
+                    gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$manifest_id" > "$RUNNER_TEMP/candidate.update.json"
+                    printf '%s  %s\n' "$manifest_sha" "$RUNNER_TEMP/candidate.update.json" | shasum -a 256 -c -
+                  fi
                   gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$ASSET_ID" > "$RUNNER_TEMP/candidate.dmg"
                   printf '%s  %s\n' "$EXPECTED_SHA" "$RUNNER_TEMP/candidate.dmg" | shasum -a 256 -c -
+                  if [ "$TARGET_VERSION" = 0.0.128 ]; then
+                    node --input-type=module - "$RUNNER_TEMP/candidate.dmg" "$RUNNER_TEMP/candidate.update.json" "$TARGET_VERSION" "$filename" "$EXPECTED_SHA" <<'NODE'
+                  import assert from "node:assert/strict";
+                  import { readFileSync, statSync } from "node:fs";
+                  import { verify } from "node:crypto";
+                  const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA09ZxJMbpq1uFEnz7n52M\nAJtceCXVQCo57lgwMAmizgJaGVGsgsMpzqgCCRgXBN+bPygE+16S9XwYOwHDlnNG\noq8h+bE9Nxce3PzsQHrscdHTT1lGQ/5XwSmvzTvxLdURtQWpaXZl7lJghUnZHNDA\n8SOHbk8rQ+butE82lhcq0C+hgJgHTUqFl9Irppi2O+MpufsZo8PX5jphD4H0aX0k\nB9P+LUreoBmG/L3T3AMZEzQZG606awc/ZMYsJcJkt4xNMjR3ZMz1aWKErW2AXDeY\nyfAo0zmEAUEAFSc3UEJRnmBAjorVA3C/rHJzYP7QabSh8ORLOUrqQYgqCpTLETpf\nct0J+NphCLuBGNQ5IeId5IPiBNZlKynGzP/HK+oJTvJ31hTHIiaA+5pfIESXELIZ\nJ5awYGW0y7fii0CqRGwFMJnU829APVvAC9LJUzSSz7NP+2rmc/boYInx8cjN2/LO\nLI9HsPvON+oxM4MhjRxDd4CVoKDpI+rB2TthSdfxt3UxAgMBAAE=\n-----END PUBLIC KEY-----";
+                  const [installer, manifest, version, filename, sha] = process.argv.slice(2);
+                  const value = JSON.parse(readFileSync(manifest, "utf8").replace(/^\uFEFF/u, ""));
+                  const size = statSync(installer).size;
+                  assert(value.sha256 === sha && value.size === size);
+                  const payload = Buffer.from([version, filename, sha, size, ""].join("\n"));
+                  assert(verify("sha256", payload, PUBLIC_KEY, Buffer.from(value.signature, "base64")));
+                  NODE
+                  fi
                   hdiutil verify "$RUNNER_TEMP/candidate.dmg"
                   mkdir "$RUNNER_TEMP/CyberFi-MCP-DMG"
                   hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/CyberFi-MCP-DMG" "$RUNNER_TEMP/candidate.dmg"

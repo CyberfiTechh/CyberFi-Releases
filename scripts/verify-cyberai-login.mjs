@@ -13,15 +13,15 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { EventEmitter } from "node:events";
 
-const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.126";
-const SOURCE_COMMIT = "357ec9398a646c3f2853437f1adf285e2a961a4f";
+const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.128";
+const SOURCE_COMMIT = "a90b7531455ad651cd0b2667cf40a4d37aaf84e3";
 const exec = promisify(execFile);
 // Independent pinned public update-verification key; never trust a key supplied by the artifact.
 const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA09ZxJMbpq1uFEnz7n52M\nAJtceCXVQCo57lgwMAmizgJaGVGsgsMpzqgCCRgXBN+bPygE+16S9XwYOwHDlnNG\noq8h+bE9Nxce3PzsQHrscdHTT1lGQ/5XwSmvzTvxLdURtQWpaXZl7lJghUnZHNDA\n8SOHbk8rQ+butE82lhcq0C+hgJgHTUqFl9Irppi2O+MpufsZo8PX5jphD4H0aX0k\nB9P+LUreoBmG/L3T3AMZEzQZG606awc/ZMYsJcJkt4xNMjR3ZMz1aWKErW2AXDeY\nyfAo0zmEAUEAFSc3UEJRnmBAjorVA3C/rHJzYP7QabSh8ORLOUrqQYgqCpTLETpf\nct0J+NphCLuBGNQ5IeId5IPiBNZlKynGzP/HK+oJTvJ31hTHIiaA+5pfIESXELIZ\nJ5awYGW0y7fii0CqRGwFMJnU829APVvAC9LJUzSSz7NP+2rmc/boYInx8cjN2/LO\nLI9HsPvON+oxM4MhjRxDd4CVoKDpI+rB2TthSdfxt3UxAgMBAAE=\n-----END PUBLIC KEY-----";
 const engines = {
-    windows: [725020635, "400d93df143bc339a0769fa2bf222ad032cd5ba736fe2dad34d67387a4b4f04b", "happy-agent-win32-x64.exe"],
-    "macos-x64": [725045506, "91e960dffbf7051133a8a16bbb250bb4870feb7bde23ec346e72d4d9b091346f", "happy-agent-darwin-x64"],
-    "macos-arm64": [725045505, "023946bd5e781cd5db5af5ed911324e3bfaa9b98e3a47632af9172f777f25011", "happy-agent-darwin-arm64"],
+    windows: [725557365, "bb54f1d46d3defe4c7678d40729d8952eb44936ca306718c58e0ebf047ae1ab9", "happy-agent-win32-x64.exe"],
+    "macos-x64": [725559913, "b74ad8a1cf98d6dda75cb48601c28e4cd265e4a50614cc1d166684ef56e610d8", "happy-agent-darwin-x64"],
+    "macos-arm64": [725559914, "20d3c971c7a2f7c044d7dcbd5c276e13de339310a9fd8e904f9d3ccd46e50690", "happy-agent-darwin-arm64"],
 };
 const id = value => { assert(Number.isSafeInteger(value) && value > 0); return value; };
 const sha = value => { assert(typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)); return value; };
@@ -77,6 +77,13 @@ function engineDiagnosticText(value, secrets) {
 function dialogErrorFirstLine(value) { return String(value ?? "").split(/\r?\n/u, 1)[0].trim(); }
 function knownNoDialogRace(value) {
     return /^(?:dialog\.dismiss: )?Protocol error \(Page\.handleJavaScriptDialog\): (?:No dialog is showing\.?|Not attached to an active page)$/u.test(dialogErrorFirstLine(value));
+}
+
+function memoryRuleMatch(record, chatId, content, message) {
+    return record?.category === "rule" && record.status === "active" && record.origin === "automatic" &&
+        record.scope?.type === "user" && record.content === content && record.source?.type === "user-message" &&
+        record.source.chatId === chatId && record.source.quote === message &&
+        typeof record.source.messageId === "string" && record.source.messageId.length > 0;
 }
 
 async function main() {
@@ -258,8 +265,8 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         }
         report.binaryIdentity = { rsaVerified: true, executableSha256: await hashFile(executable), quarantineModified: false, fusesModified: false };
         stage = "owned engine fixture";
-        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438481860"), [engineId, engineSha, engineName] = engines[target];
-        assert(engineRelease.tag_name === "v0.4.119" && !engineRelease.draft);
+        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438601789"), [engineId, engineSha, engineName] = engines[target];
+        assert(engineRelease.tag_name === "v0.4.120" && !engineRelease.draft && !engineRelease.prerelease);
         const engineAsset = engineRelease.assets.find(item => item.id === engineId); assert.equal(engineAsset?.digest, "sha256:" + engineSha);
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
         stage = "owned engine archive download";
@@ -272,7 +279,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         assert.equal(await command(tar, ["-tzf", archive]), engineName); await command(tar, ["-xzf", archive, "-C", engineRoot]);
         const engine = join(engineRoot, engineName); process.env.HAPPY_DESKTOP_AGENT_EXECUTABLE = engine;
         stage = "owned engine version verification";
-        assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.119");
+        assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.120");
         stage = "upstream gym import and isolated paths";
         const gym = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
         const { gymElectronProcessRun, gymElectronVideoRecord } = await import(gym("launch"));
@@ -286,19 +293,19 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const { happyAgentBinarySelected } = await import(desktopMain("happyAgentBinaryConfig"));
         const { happyAgentReleaseInstall } = await import(desktopMain("happyAgentRelease"));
         const cachePaths = happyDaemonPaths({ HAPPY_HOME_DIR: paths.happyHome }, paths.home);
-        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.119");
+        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.120");
         assert(cachedEngine.startsWith(paths.root + sep) && cachePaths.binaryConfigPath.startsWith(paths.root + sep));
         await mkdir(dirname(cachedEngine), { recursive: true, mode: 0o700 });
         await copyFile(engine, cachedEngine, constants.COPYFILE_EXCL); await chmod(cachedEngine, 0o700);
         const extractedBinarySha = await hashFile(engine); assert.equal(await hashFile(cachedEngine), extractedBinarySha);
         // Consume verified cached bytes through the normal lock/data-floor/
         // atomic-selection producer. No fetch interception or forged status.
-        const installed = await happyAgentReleaseInstall({ version: "0.4.119", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
-        assert(installed.version === "0.4.119" && installed.path === cachedEngine);
+        const installed = await happyAgentReleaseInstall({ version: "0.4.120", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
+        assert(installed.version === "0.4.120" && installed.path === cachedEngine);
         assert.deepEqual(await happyAgentBinarySelected(cachePaths), installed);
-        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.119");
+        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.120");
         const cacheConfig = JSON.parse(await readFile(cachePaths.binaryConfigPath, "utf8"));
-        assert.deepEqual(cacheConfig, { downloadedVersions: ["0.4.119"], selectedVersion: "0.4.119" });
+        assert.deepEqual(cacheConfig, { downloadedVersions: ["0.4.120"], selectedVersion: "0.4.120" });
         report.managedEnginePrecondition = { producer: "pinned upstream happyAgentReleaseInstall consuming verified cached bytes", version: installed.version, executableSha256: extractedBinarySha, config: cacheConfig, fetchOverridden: false, dataVersionFabricated: false };
         inferenceToken = randomBytes(24).toString("hex"); let inferenceCalls = 0;
         inference = createServer(async (request, response) => {
@@ -515,6 +522,14 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
             assert(!/token|password|encrypted/iu.test(JSON.stringify(Object.keys(account))) && !JSON.stringify(account).includes(password), "Account snapshot leaked protected fields");
             assert.equal(await login().count(), 0);
         }
+        async function openFixtureChat() {
+            await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]'), undefined, { timeout: 60000 });
+            const row = page.locator(`[data-happy-desktop-ui="sidebar-item"][data-item-id="local/${project.id}"]`);
+            await row.waitFor({ state: "visible", timeout: 45000 }); await row.click();
+            const tab = page.locator(`[data-happy-desktop-ui="tab"][data-tab-id="${agent.id}"]`);
+            await tab.waitFor({ state: "visible", timeout: 30000 }); await tab.click();
+            await page.getByText("Native CyberAI chat acceptance confirmed.", { exact: true }).first().waitFor({ state: "visible", timeout: 30000 });
+        }
         stage = "initial login screen"; await launch("login-lifetime"); await waitLogin();
         assert.match(await login().innerText(), /CyberFi/u); assert.equal(await login().locator('input[name="password"]').getAttribute("type"), "password");
         const remember = login().getByRole("checkbox", { name: "Beni hatırla" }); assert.equal(await remember.isChecked(), false);
@@ -544,13 +559,43 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         assert.deepEqual(Object.keys(sealed).sort(), ["encrypted", "version"]); assert.equal(sealed.version, 1); assert.match(sealed.encrypted, /^[A-Za-z0-9+/]+={0,2}$/u);
         assert(!savedText.includes(username) && !savedText.includes(password));
         report.checks.initialLogin = true; report.checks.privilegedIpcDenied = true; report.checks.wrongPasswordGeneric = true; report.checks.nativeEncryptedStorage = true;
+        stage = "synthetic GUI memory rule send";
+        await openFixtureChat();
+        const ruleContent = `Deneme başlığında mercan simgesi kullan ${randomBytes(4).toString("hex")}.`;
+        const ruleMessage = `Yeni genel kural: ${ruleContent}`;
+        const composer = page.locator('[data-happy-desktop-ui="composer"]:visible');
+        await composer.locator('[data-happy-desktop-ui="composer-textarea"]').fill(ruleMessage, { timeout: 30000 });
+        await composer.getByRole("button", { name: /^(Send message|Mesaj gönder)$/iu }).click({ timeout: 30000 });
+        stage = "owned profile memory rule persistence";
+        // CyberFiMemoryService uses <userData>/desktop/memory/SHA256(owner).json.
+        const owner = "local", memoryPath = join(configDir, "memory", createHash("sha256").update(owner).digest("hex") + ".json");
+        let persistedRule;
+        const memoryDeadline = Date.now() + 30000;
+        while (!persistedRule && Date.now() < memoryDeadline) {
+            const info = await lstat(memoryPath).catch(error => { if (error.code !== "ENOENT") throw error; });
+            if (info) {
+                assert(info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && info.size <= 64 * 1024 &&
+                    await realpath(memoryPath) === memoryPath, "Expected the owned synthetic memory file");
+                const memory = JSON.parse(await readFile(memoryPath, "utf8"));
+                persistedRule = memory.records.find(record => memoryRuleMatch(record, agent.id, ruleContent, ruleMessage));
+            }
+            if (!persistedRule) await delay(250);
+        }
+        assert(persistedRule, "The real composer send did not persist an active global rule");
+        report.checks.memoryRulePersisted = true;
         stage = "first native app termination";
         const firstPid = ownedPid; await endVideo(); await stopOwned(); await browser.close(); browser = undefined; page = undefined;
         stage = "native remembered relaunch"; await launch("reopened-lifetime"); assert.notEqual(ownedPid, firstPid); await accountReady();
-        await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]'), undefined, { timeout: 60000 });
-        const row = page.locator(`[data-happy-desktop-ui="sidebar-item"][data-item-id="local/${project.id}"]`); await row.waitFor({ state: "visible", timeout: 45000 }); await row.click();
-        const tab = page.locator(`[data-happy-desktop-ui="tab"][data-tab-id="${agent.id}"]`); await tab.waitFor({ state: "visible", timeout: 30000 }); await tab.click();
-        await page.getByText("Native CyberAI chat acceptance confirmed.", { exact: true }).first().waitFor({ state: "visible", timeout: 30000 });
+        stage = "native memory rule reload";
+        const reloadedRule = await page.evaluate(async ({ owner, ruleId }) => {
+            const snapshot = await window.happyDesktop.cyberFiMemoryRead(owner);
+            return snapshot.records.find(record => record.id === ruleId);
+        }, { owner, ruleId: persistedRule.id });
+        assert(memoryRuleMatch(reloadedRule, agent.id, ruleContent, ruleMessage) && reloadedRule.revision === persistedRule.revision,
+            "The relaunched app did not reload the same global rule");
+        report.checks.memoryRuleReloaded = true;
+        stage = "reopened synthetic workspace chat";
+        await openFixtureChat();
         report.checks.actualWorkspaceChatRendered = true;
         await page.screenshot({ path: join(evidence, "reopened.png"), mask: [page.getByText(username, { exact: true })] });
         report.checks.actualTerminateRelaunch = true; report.checks.nativeRememberWithoutPasswordEntry = true;
@@ -701,6 +746,11 @@ if (process.argv.includes("--self-test")) {
     assert(knownNoDialogRace("dialog.dismiss: Protocol error (Page.handleJavaScriptDialog): Not attached to an active page\r\nCall log:"));
     assert(!knownNoDialogRace("dialog.dismiss: Protocol error (Page.navigate): Not attached to an active page"));
     assert(!knownNoDialogRace("dialog.dismiss: Protocol error (Page.handleJavaScriptDialog): Target closed"));
-    assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.126-x64.exe", pin.sha256, 10));
-    console.log("Strict artifact pins, redirect refusal, independent RSA refusal and credential environment isolation passed. No app or network used.");
+    const rule = { category: "rule", status: "active", origin: "automatic", scope: { type: "user" }, content: "Deneme kuralı.", source: { type: "user-message", chatId: "owned-chat", messageId: "owned-message", quote: "Yeni genel kural: Deneme kuralı." } };
+    const matchesRule = record => memoryRuleMatch(record, "owned-chat", rule.content, rule.source.quote);
+    assert(matchesRule(rule));
+    for (const record of [null, { ...rule, status: "candidate" }, { ...rule, origin: "manual" }, { ...rule, scope: { type: "chat" } },
+        { ...rule, source: { ...rule.source, chatId: "other-chat" } }, { ...rule, source: { ...rule.source, messageId: "" } }]) assert(!matchesRule(record));
+    assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.128-x64.exe", pin.sha256, 10));
+    console.log("Strict artifact pins, redirect refusal, independent RSA refusal, credential environment isolation and synthetic memory matching passed. No app or network used.");
 } else await main();

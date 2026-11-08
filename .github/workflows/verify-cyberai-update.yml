@@ -1,5 +1,5 @@
 name: Verify CyberAI published native automatic update
-run-name: CyberAI public126 automatic update ${{ inputs.target }}
+run-name: CyberAI public128 automatic update ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -37,22 +37,37 @@ jobs:
             - name: Install existing hidden launcher and recording dependencies
               working-directory: upstream
               shell: bash
+              env:
+                  PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/cyberfi-update-playwright
               run: |
                   pnpm install --frozen-lockfile --ignore-scripts
                   pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
+                  echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+            - name: Select the shared Windows recording executable
+              if: inputs.target == 'windows'
+              shell: pwsh
+              run: |
+                  $cache = Get-Item -LiteralPath $env:PLAYWRIGHT_BROWSERS_PATH
+                  $expected = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'cyberfi-update-playwright'))
+                  if ($cache.FullName -ne $expected -or ($cache.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid owned ffmpeg cache' }
+                  $ffmpeg = @(Get-ChildItem -LiteralPath $cache.FullName -Directory -Filter 'ffmpeg-*' |
+                      Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+                      ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName 'ffmpeg-win64.exe') -ErrorAction SilentlyContinue })
+                  if ($ffmpeg.Count -ne 1 -or $ffmpeg[0].PSIsContainer -or ($ffmpeg[0].Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Exactly one owned ffmpeg executable is required' }
+                  "HAPPY_DESKTOP_GYM_FFMPEG=$($ffmpeg[0].FullName)" >> $env:GITHUB_ENV
             - name: Verify real GUI download, install, automatic reopen and protected login
               working-directory: upstream
               shell: bash
               env:
                   TARGET: ${{ inputs.target }}
                   ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
-                  ACCEPTANCE_SOURCE_SHA: 357ec9398a646c3f2853437f1adf285e2a961a4f
+                  ACCEPTANCE_SOURCE_SHA: a90b7531455ad651cd0b2667cf40a4d37aaf84e3
                   GH_TOKEN: ${{ github.token }}
                   CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI125_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
                   CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI125_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
               run: |
                   if [[ "$TARGET" == "windows" ]]; then
-                    node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-cyberai-windows-update.mjs" "$GITHUB_WORKSPACE/upstream"
+                    powershell.exe -NoLogo -NoProfile -NonInteractive -File "$GITHUB_WORKSPACE/acceptance/scripts/windows-owned-launch.ps1" -RunUpdate
                   else
                     node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-cyberai-macos-update.mjs" "$GITHUB_WORKSPACE/upstream"
                   fi
@@ -61,7 +76,7 @@ jobs:
               with:
                   name: CyberAI-automatic-update-${{ inputs.target }}
                   path: |
-                      ${{ runner.temp }}/cyberfi-windows-auth-update/evidence
+                      ${{ runner.temp }}/cyberfi-windows-owned-evidence
                       ${{ runner.temp }}/cyberfi-macos-app-update/evidence
                   retention-days: 7
                   include-hidden-files: false

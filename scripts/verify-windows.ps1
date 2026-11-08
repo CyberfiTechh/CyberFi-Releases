@@ -1,4 +1,4 @@
-param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [switch]$InApp120, [switch]$InApp121, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121", "0.0.122")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [switch]$InApp120, [switch]$InApp121, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121", "0.0.122", "0.0.128")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
@@ -11,6 +11,14 @@ $expected = @{
     '0.0.118' = '5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381'
     '0.0.120' = '3946c0f512ebe8f1cce8017c80734dfa2aa5d587898bb5bd2e5f550f786735e8'
     '0.0.121' = 'caff2c0b37b14088e10daa29c268bf34da2de87d97b7d8bb85d1b62c9abc637a'
+    '0.0.128' = '8d83687fef0d044bb13a95013549bd7323902e9d127b5f3f252a23fa8dec5bf0'
+}
+$mcp128 = @{
+    releaseId = 438599980
+    installerAssetId = 725548857
+    sourceCitation = 'Kaynak: https://github.com/CyberfiTechh/CyberFi/commit/a90b7531455ad651cd0b2667cf40a4d37aaf84e3'
+    '.sha256' = @{ id = 725554788; sha256 = 'dc1caa0756e7ebd2925ecc8d2503bbdd07d44ff20a968f16b7cd7b57a2595054' }
+    '.update.json' = @{ id = 725554876; sha256 = '333ab4e06a17b6d7ad50886544192533775c80844052334ba1f3d507dd4a009d' }
 }
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 if ($TargetVersion -eq '0.0.117') {
@@ -22,6 +30,10 @@ if ($TargetVersion -in @('0.0.118','0.0.119','0.0.120','0.0.121','0.0.122')) {
     if ($expected.ContainsKey($TargetVersion)) {
         Assert-True ($TargetSha256 -ceq $expected[$TargetVersion]) 'Published immutable digest changed'
     } else { $expected[$TargetVersion] = $TargetSha256 }
+}
+if ($TargetVersion -eq '0.0.128') {
+    Assert-True ($Mcp115 -and -not $Upgrade115) '128 is only permitted for the isolated MCP acceptance'
+    Assert-True ($TargetSha256 -ceq $expected['0.0.128']) '128 requires the exact reviewed installer digest'
 }
 
 Assert-True (([int]$InApp117.IsPresent + [int]$InApp120.IsPresent + [int]$InApp121.IsPresent) -le 1) 'Only one bounded GUI scenario may run'
@@ -82,12 +94,14 @@ if ($SelfCheck) {
 
     Assert-True ((Get-UpgradeSource '0.0.121') -eq '0.0.120') '121 source must be the published120'
     Assert-True ((Get-UpgradeSource '0.0.122') -eq '0.0.121') '122 source must be the published121'
-    Assert-True ($expected.Count -in @(8, 9)) 'Only immutable pinned versions allowed'
-    Assert-True ($expected.ContainsKey((Get-UpgradeSource $TargetVersion))) 'Upgrade baseline must have an immutable installer digest'
+    Assert-True ($expected.Count -in @(9, 10)) 'Only immutable pinned versions allowed'
+    if ($TargetVersion -ne '0.0.128') {
+        Assert-True ($expected.ContainsKey((Get-UpgradeSource $TargetVersion))) 'Upgrade baseline must have an immutable installer digest'
+    }
     Assert-True ($expected.ContainsKey('0.0.120') -and $expected.ContainsKey('0.0.118')) 'Current GUI rollback requires both immutable installer pins'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
-        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118', '0.0.119', '0.0.120', '0.0.121', '0.0.122')) 'Unexpected version'
+        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118', '0.0.119', '0.0.120', '0.0.121', '0.0.122', '0.0.128')) 'Unexpected version'
     }
     Assert-True ($certificateThumbprint -cmatch '^[A-F0-9]{40}$') 'Invalid certificate pin'
     $null = Assert-Owned (Join-Path ([IO.Path]::GetTempPath()) 'owned/item') ([IO.Path]::GetTempPath())
@@ -217,17 +231,27 @@ if ($env:GH_TOKEN) { $releaseHeaders.Authorization = 'Bearer ' + $env:GH_TOKEN }
 foreach ($version in $versions) {
     $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/v$version" -Headers $releaseHeaders -TimeoutSec 30 -MaximumRetryCount 2 -RetryIntervalSec 2
     Assert-True (-not $release.draft -and $release.tag_name -ceq "v$version") 'Expected an actual published release'
+    if ($version -eq '0.0.128') {
+        Assert-True ($release.id -eq $mcp128.releaseId -and ([string]$release.body).Contains($mcp128.sourceCitation)) 'Published 128 release or reviewed source citation changed'
+    }
     $release | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath (Join-Path $evidence "release-$version.json") -Encoding utf8
     $name = "CyberFi-$version-x64.exe"
     $asset = @($release.assets | Where-Object { $_.name -ceq $name })
     Assert-True ($asset.Count -eq 1 -and $asset[0].state -eq 'uploaded' -and
         $asset[0].digest -ceq "sha256:$($expected[$version])") 'Immutable installer asset mismatch'
+    if ($version -eq '0.0.128') {
+        Assert-True ($asset[0].id -eq $mcp128.installerAssetId) 'Reviewed 128 installer asset ID changed'
+    }
     $path = Join-Path $root $name
     Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name" $path $asset[0].id
     Assert-True ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $expected[$version]) 'Downloaded installer digest mismatch'
     foreach ($suffix in @('.sha256', '.update.json')) {
         $metadata = @($release.assets | Where-Object { $_.name -ceq "$name$suffix" })
         Assert-True ($metadata.Count -eq 1 -and $metadata[0].state -eq 'uploaded') 'Missing release verification asset'
+        if ($version -eq '0.0.128') {
+            $pinned = $mcp128[$suffix]
+            Assert-True ($metadata[0].id -eq $pinned.id -and $metadata[0].digest -ceq "sha256:$($pinned.sha256)") 'Reviewed 128 verification asset changed'
+        }
         $sidecar = "$path$suffix"
         Receive-PublishedAsset "https://github.com/$repo/releases/download/v$version/$name$suffix" $sidecar $metadata[0].id
         Assert-True ("sha256:$((Get-FileHash $sidecar -Algorithm SHA256).Hash.ToLowerInvariant())" -ceq $metadata[0].digest) 'Verification asset digest mismatch'

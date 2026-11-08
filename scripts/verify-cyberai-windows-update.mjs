@@ -13,15 +13,15 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { EventEmitter } from "node:events";
 
-const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.126";
-const SOURCE_COMMIT = "357ec9398a646c3f2853437f1adf285e2a961a4f";
+const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.128";
+const SOURCE_COMMIT = "a90b7531455ad651cd0b2667cf40a4d37aaf84e3";
 const exec = promisify(execFile);
 // Independent pinned public update-verification key; never trust a key supplied by the artifact.
 const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA09ZxJMbpq1uFEnz7n52M\nAJtceCXVQCo57lgwMAmizgJaGVGsgsMpzqgCCRgXBN+bPygE+16S9XwYOwHDlnNG\noq8h+bE9Nxce3PzsQHrscdHTT1lGQ/5XwSmvzTvxLdURtQWpaXZl7lJghUnZHNDA\n8SOHbk8rQ+butE82lhcq0C+hgJgHTUqFl9Irppi2O+MpufsZo8PX5jphD4H0aX0k\nB9P+LUreoBmG/L3T3AMZEzQZG606awc/ZMYsJcJkt4xNMjR3ZMz1aWKErW2AXDeY\nyfAo0zmEAUEAFSc3UEJRnmBAjorVA3C/rHJzYP7QabSh8ORLOUrqQYgqCpTLETpf\nct0J+NphCLuBGNQ5IeId5IPiBNZlKynGzP/HK+oJTvJ31hTHIiaA+5pfIESXELIZ\nJ5awYGW0y7fii0CqRGwFMJnU829APVvAC9LJUzSSz7NP+2rmc/boYInx8cjN2/LO\nLI9HsPvON+oxM4MhjRxDd4CVoKDpI+rB2TthSdfxt3UxAgMBAAE=\n-----END PUBLIC KEY-----";
 const engines = {
-    windows: [725020635, "400d93df143bc339a0769fa2bf222ad032cd5ba736fe2dad34d67387a4b4f04b", "happy-agent-win32-x64.exe"],
-    "macos-x64": [725045506, "91e960dffbf7051133a8a16bbb250bb4870feb7bde23ec346e72d4d9b091346f", "happy-agent-darwin-x64"],
-    "macos-arm64": [725045505, "023946bd5e781cd5db5af5ed911324e3bfaa9b98e3a47632af9172f777f25011", "happy-agent-darwin-arm64"],
+    windows: [725557365, "bb54f1d46d3defe4c7678d40729d8952eb44936ca306718c58e0ebf047ae1ab9", "happy-agent-win32-x64.exe"],
+    "macos-x64": [725559913, "b74ad8a1cf98d6dda75cb48601c28e4cd265e4a50614cc1d166684ef56e610d8", "happy-agent-darwin-x64"],
+    "macos-arm64": [725559914, "20d3c971c7a2f7c044d7dcbd5c276e13de339310a9fd8e904f9d3ccd46e50690", "happy-agent-darwin-arm64"],
 };
 const id = value => { assert(Number.isSafeInteger(value) && value > 0); return value; };
 const sha = value => { assert(typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)); return value; };
@@ -89,18 +89,18 @@ function engineDiagnosticText(value, secrets) {
 
 const REVIEWED_ARTIFACTS = {
     "source": {
-        "releaseId": 438339789,
-        "assetId": 724385985,
-        "sha256": "03480876e9e996bcf1429561a7ac154fb3b2b56c15a5bcd8882e3633173080be",
-        "manifestAssetId": 724394038,
-        "manifestSha256": "502744dc7eb6f4f04681be4fc49d30b88d0605d4d7ed600a2aa6f770c53d7482"
-    },
-    "target": {
         "releaseId": 438479244,
         "assetId": 725008723,
         "sha256": "46ac84d70c9d5f0587bdca34295bf4719b5c3f27b3639a2da645c7f392d97f88",
         "manifestAssetId": 725016062,
         "manifestSha256": "019b81b6d004229888e043f37ced7541a08f4f3ef3d85d5cb876ee8da2246e39"
+    },
+    "target": {
+        "releaseId": 438599980,
+        "assetId": 725548857,
+        "sha256": "8d83687fef0d044bb13a95013549bd7323902e9d127b5f3f252a23fa8dec5bf0",
+        "manifestAssetId": 725554876,
+        "manifestSha256": "333ab4e06a17b6d7ad50886544192533775c80844052334ba1f3d507dd4a009d"
     }
 };
 async function main() {
@@ -121,7 +121,7 @@ async function main() {
     const root = join(await realpath(process.env.RUNNER_TEMP), "cyberfi-windows-auth-update"); await mkdir(root);
     const evidence = join(root, "evidence"), applications = join(root, "Applications"); let profile;
     await Promise.all([evidence, applications].map(path => mkdir(path)));
-    const report = { success: false, sourceVersion: "0.0.125", targetVersion: VERSION, sourceCommit: SOURCE_COMMIT,
+    const report = { success: false, sourceVersion: "0.0.126", targetVersion: VERSION, sourceCommit: SOURCE_COMMIT,
         progress: [], events: [], videos: [], errors: [], limits: ["Unmodified production NSIS must preserve hidden/debug environment itself; otherwise acceptance fails without a manual target launch.", "No OS trust-store changes; RSA pins and Authenticode CMS are checked independently."] };
     const save = () => writeFile(join(evidence, "automatic-update.json"), JSON.stringify(report, null, 2) + "\n");
     const command = async (file, args, options = {}) => {
@@ -185,23 +185,25 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
     let stage = "published artifacts", updateArmed = false, rendererDetached = false, monitorPhase = "process-poll";
     const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
     async function processes() {
-        const value = await powershell(`@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe','CyberFi-0.0.126-x64.exe') } | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Depth 3 -Compress`);
+        const value = await powershell(`@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe','CyberFi-0.0.128-x64.exe') } | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Depth 3 -Compress`);
         const parsed = value ? JSON.parse(value) : []; return Array.isArray(parsed) ? parsed : [parsed];
     }
     try {
         stage = "disposable CI default-profile ownership";
-        const nativeIdentity = JSON.parse(await powershell(String.raw`[ordered]@{roaming=[Environment]::GetFolderPath('ApplicationData');home=[Environment]::GetFolderPath('UserProfile');sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;name=[Security.Principal.WindowsIdentity]::GetCurrent().Name;installed=(Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\f8156223-0df4-5c6f-b223-7004db2f68a2')}|ConvertTo-Json -Compress`));
+        const nativeIdentity = JSON.parse(await powershell(String.raw`$identity=[Security.Principal.WindowsIdentity]::GetCurrent();$principal=[Security.Principal.WindowsPrincipal]::new($identity);[ordered]@{roaming=[Environment]::GetFolderPath('ApplicationData');home=[Environment]::GetFolderPath('UserProfile');sid=$identity.User.Value;administrator=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator);installed=(Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\f8156223-0df4-5c6f-b223-7004db2f68a2')}|ConvertTo-Json -Compress`));
         const roaming = await realpath(environmentValue(safeEnv, "APPDATA")), nativeHome = await realpath(environmentValue(safeEnv, "USERPROFILE"));
         assert.equal((await realpath(nativeIdentity.roaming)).toLowerCase(), roaming.toLowerCase()); assert.equal((await realpath(nativeIdentity.home)).toLowerCase(), nativeHome.toLowerCase());
         assert(roaming.toLowerCase().startsWith(nativeHome.toLowerCase() + sep) && /\\AppData\\Roaming$/iu.test(roaming) && /^S-1-5-21-/u.test(nativeIdentity.sid) && !nativeIdentity.installed, "Fresh hosted-user profile and absent installation required");
+        assert.equal(nativeIdentity.sid, environmentValue(safeEnv, "CYBERFI_TEST_EXPECTED_SID"));
+        assert.equal(nativeIdentity.administrator, false, "The actual installer test requires a standard user");
         // Hidden mode intentionally leaves Electron's default userData: appData/app.getName(), app name CyberFi.
-        // Both public125 and126 source use this same existing hidden-mode contract.
+        // The source and target packages use this same hidden-mode contract.
         profile = join(roaming, "CyberFi");
         for (const path of [profile, join(roaming, "PDR Koçum Agent"), join(nativeHome, ".pdr-kocum-agent"), join(nativeHome, ".agents/skills")]) await assert.rejects(lstat(path), { code: "ENOENT" });
         await mkdir(profile); assert.equal((await realpath(profile)).toLowerCase(), profile.toLowerCase());
         report.defaultProfileOwnership = { path: profile, canonicalRoaming: roaming, canonicalHome: nativeHome, sid: nativeIdentity.sid, initiallyAbsent: true, disposableHostedRunnerOnly: true, defaultProfileContract: "Hidden mode appData/CyberFi" };
         const artifacts = {};
-        for (const [kind, version] of [["source", "0.0.125"], ["target", VERSION]]) {
+        for (const [kind, version] of [["source", "0.0.126"], ["target", VERSION]]) {
             const pin = pins[kind], release = await api(`repos/${REPOSITORY}/releases/${pin.releaseId}`);
             assert(publishedReleaseMatches(release, pin.releaseId, "v" + version), "Both exact Windows releases must be published");
             const filename = `CyberFi-${version}-x64.exe`, asset = release.assets.find(item => item.id === pin.assetId), manifest = release.assets.find(item => item.id === pin.manifestAssetId);
@@ -226,7 +228,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         // Real per-user NSIS installation, not archive extraction. No trust certificate is installed.
         await command(artifacts.source.path, ["/S", "/D=" + installation], { timeout: 180000 });
         executable = join(installation, "CyberFi.exe"); assert(executable.startsWith(root + sep));
-        assert.equal(await powershell(`(Get-Item -LiteralPath ${quote(executable)}).VersionInfo.ProductVersion`), "0.0.125.0");
+        assert.equal(await powershell(`(Get-Item -LiteralPath ${quote(executable)}).VersionInfo.ProductVersion`), "0.0.126.0");
         report.sourceSignature = await windowsSignature(executable);
             watcherStop = join(root, "visibility-stop");
             const watcherSource = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
@@ -264,8 +266,8 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             await watcherReady(watcher);
             visibilityDone.then(value => { if (value.onscreenSamples > 0 || value.activeSamples > 0) monitorError = Error("Owned window became visible or focused and was stopped"); }, () => { monitorError = Error("Native visibility observer failed"); });
         stage = "owned engine fixture";
-        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438481860"), [engineId, engineSha, engineName] = engines[target];
-        assert(engineRelease.tag_name === "v0.4.119" && !engineRelease.draft);
+        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438601789"), [engineId, engineSha, engineName] = engines[target];
+        assert(engineRelease.tag_name === "v0.4.120" && !engineRelease.draft && !engineRelease.prerelease);
         const engineAsset = engineRelease.assets.find(item => item.id === engineId); assert.equal(engineAsset?.digest, "sha256:" + engineSha);
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
         stage = "owned engine archive download";
@@ -278,7 +280,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         assert.equal(await command(tar, ["-tzf", archive]), engineName); await command(tar, ["-xzf", archive, "-C", engineRoot]);
         const engine = join(engineRoot, engineName); process.env.HAPPY_DESKTOP_AGENT_EXECUTABLE = engine;
         stage = "owned engine version verification";
-        assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.119");
+        assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.120");
         stage = "upstream gym import and isolated paths";
         const gym = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
         const { gymElectronProcessRun, gymElectronVideoRecord } = await import(gym("launch"));
@@ -292,19 +294,19 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const { happyAgentBinarySelected } = await import(desktopMain("happyAgentBinaryConfig"));
         const { happyAgentReleaseInstall } = await import(desktopMain("happyAgentRelease"));
         const cachePaths = happyDaemonPaths({ HAPPY_HOME_DIR: paths.happyHome }, paths.home);
-        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.119");
+        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.120");
         assert(cachedEngine.startsWith(paths.root + sep) && cachePaths.binaryConfigPath.startsWith(paths.root + sep));
         await mkdir(dirname(cachedEngine), { recursive: true, mode: 0o700 });
         await copyFile(engine, cachedEngine, constants.COPYFILE_EXCL); await chmod(cachedEngine, 0o700);
         const extractedBinarySha = await hashFile(engine); assert.equal(await hashFile(cachedEngine), extractedBinarySha);
         // Consume verified cached bytes through the normal lock/data-floor/
         // atomic-selection producer. No fetch interception or forged status.
-        const installed = await happyAgentReleaseInstall({ version: "0.4.119", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
-        assert(installed.version === "0.4.119" && installed.path === cachedEngine);
+        const installed = await happyAgentReleaseInstall({ version: "0.4.120", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
+        assert(installed.version === "0.4.120" && installed.path === cachedEngine);
         assert.deepEqual(await happyAgentBinarySelected(cachePaths), installed);
-        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.119");
+        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.120");
         const cacheConfig = JSON.parse(await readFile(cachePaths.binaryConfigPath, "utf8"));
-        assert.deepEqual(cacheConfig, { downloadedVersions: ["0.4.119"], selectedVersion: "0.4.119" });
+        assert.deepEqual(cacheConfig, { downloadedVersions: ["0.4.120"], selectedVersion: "0.4.120" });
         report.managedEnginePrecondition = { producer: "pinned upstream happyAgentReleaseInstall consuming verified cached bytes", version: installed.version, executableSha256: extractedBinarySha, config: cacheConfig, fetchOverridden: false, dataVersionFabricated: false };
 
         inferenceToken = randomBytes(24).toString("hex"); let inferenceCalls = 0;
@@ -387,11 +389,11 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         video = await gymElectronVideoRecord(page, { path: join(evidence, "actual-source-update.webm"), fps: 5 });
         await page.evaluate(() => { localStorage.setItem("pdr-kocum-agent.language", "tr"); localStorage.setItem("happy.welcome.v1", JSON.stringify({ welcomeAcknowledged: true })); });
         await page.reload({ waitUntil: "commit" });
-        stage = "source125 protected login";
+        stage = "source126 protected login";
         await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]') && !!document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"] input[name="password"]:not(:disabled)'), undefined, { timeout: 60000 });
         await page.addStyleTag({ content: 'input[name="username"], input[name="password"] { color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }' });
         const sourceLogin = page.locator('[data-happy-desktop-ui="cyberfi-account-login"]');
-        assert(await page.evaluate(async () => { try { await window.happyDesktop.runtimeGet(); return false; } catch { return true; } }), "Source125 must deny privileged IPC before login");
+        assert(await page.evaluate(async () => { try { await window.happyDesktop.runtimeGet(); return false; } catch { return true; } }), "Source126 must deny privileged IPC before login");
         await sourceLogin.locator('input[name="username"]').fill(username); await sourceLogin.locator('input[name="password"]').fill(password);
         assert.equal(await sourceLogin.getByRole("checkbox", { name: "Beni hatırla" }).isChecked(), false);
         await sourceLogin.getByRole("button", { name: "Giriş yap", exact: true }).click();
@@ -413,12 +415,12 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const general = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await general.count()) await general.click();
         const select = page.locator("#cyberfi-settings-desktop-version"); await select.waitFor({ state: "visible", timeout: 60000 });
         await page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/iu }).first().click();
-        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(value => value.version === "0.0.126"), undefined, { timeout: 45000 });
+        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(value => value.version === "0.0.128"), undefined, { timeout: 45000 });
         await select.selectOption(VERSION);
         const installers = [];
         monitor = (async () => { while (!stopWatch) {
             monitorPhase = "process-poll";
-            installers.push(...(await processes()).filter(value => value.Name === "CyberFi-0.0.126-x64.exe"));
+            installers.push(...(await processes()).filter(value => value.Name === "CyberFi-0.0.128-x64.exe"));
             if (alive(oldPid) && !rendererDetached) {
                 monitorPhase = "renderer-poll";
                 try { const value = await page.evaluate(async () => { const update = (await window.happyDesktop.runtimeGet()).update, bar = document.querySelector('[role="progressbar"][aria-label="Masaüstü indirmesi"], [role="progressbar"][aria-label="Desktop download"]'), visible = !!bar?.getClientRects().length && getComputedStyle(bar).visibility !== "hidden";
@@ -455,6 +457,9 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             assert(candidates.length <= 1); if (candidates.length) { replacement = candidates[0]; break; } await delay(200);
         }
         assert(replacement && !alive(oldPid), "No automatically restarted target at owned installation path"); newPid = id(replacement.ProcessId);
+        const replacementOwner = await powershell(`$process=Get-CimInstance Win32_Process -Filter 'ProcessId=${newPid}';$owner=Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid;if($owner.ReturnValue -ne 0){throw 'Could not verify the relaunched owner'};$owner.Sid`);
+        assert.equal(replacementOwner, nativeIdentity.sid, "Automatic relaunch must stay in the same standard user profile");
+        report.automaticRelaunchSameUser = true;
         const installerExitBy = Date.now() + 180000;
         while (alive(installer.ProcessId) && Date.now() < installerExitBy) await delay(100);
         assert(!alive(installer.ProcessId), "Actual app-owned installer did not exit"); report.installer.exitObserved = true;
@@ -518,7 +523,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         // Keep the native observer active until the installer cannot launch
         // another target and every exact owned app process has terminated.
         try {
-            for (const value of (await processes()).filter(value => value.Name === "CyberFi-0.0.126-x64.exe" && value.ParentProcessId === report.oldPid && /--updated/u.test(value.CommandLine ?? "") && /--force-run/u.test(value.CommandLine ?? ""))) {
+            for (const value of (await processes()).filter(value => value.Name === "CyberFi-0.0.128-x64.exe" && value.ParentProcessId === report.oldPid && /--updated/u.test(value.CommandLine ?? "") && /--force-run/u.test(value.CommandLine ?? ""))) {
                 assert(value.ExecutablePath?.toLowerCase().includes("cyberfi-update-"));
                 assert.equal(await hashFile(value.ExecutablePath), pins.target.sha256); await windowsSignature(value.ExecutablePath);
                 if (verifiedInstaller) assert(value.ProcessId === verifiedInstaller.ProcessId && value.CreationDate === verifiedInstaller.CreationDate);
@@ -548,10 +553,10 @@ if (process.argv.includes("--self-test")) {
     assert.equal(updateMonitorKind(Error("page.evaluate: Target page, context or browser has been closed"), "process-poll"), "process-poll-error");
     assert.equal(updateMonitorKind({ cyberfiUpdateFailure: "updater-error", message: "page.evaluate: Target page, context or browser has been closed" }, "renderer-poll"), "updater-error");
 
-    assert(publishedReleaseMatches({ id: 1, tag_name: "v0.0.126", draft: false }, 1, "v0.0.126"));
-    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.126", draft: true }, 1, "v0.0.126"));
-    assert(!publishedReleaseMatches({ id: 2, tag_name: "v0.0.126", draft: false }, 1, "v0.0.126"));
-    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.125", draft: false }, 1, "v0.0.126"));
+    assert(publishedReleaseMatches({ id: 1, tag_name: "v0.0.128", draft: false }, 1, "v0.0.128"));
+    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.128", draft: true }, 1, "v0.0.128"));
+    assert(!publishedReleaseMatches({ id: 2, tag_name: "v0.0.128", draft: false }, 1, "v0.0.128"));
+    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.126", draft: false }, 1, "v0.0.128"));
     for (const pin of Object.values(REVIEWED_ARTIFACTS)) artifactPins(pin);
     assert.throws(() => artifactPins({ ...REVIEWED_ARTIFACTS.source, assetId: -1 }));
     assert.throws(() => allowedRedirect("https://api.github.com.evil.test/"));
