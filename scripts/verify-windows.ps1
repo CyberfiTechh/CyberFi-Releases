@@ -47,11 +47,17 @@ $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\f8156
 Assert-True (-not (Test-Path -LiteralPath $uninstallKey)) 'Existing CyberFi installation must never be replaced'
 $installation = Assert-Owned (Join-Path $root 'installed') $root
 $exe = Join-Path $installation 'CyberFi.exe'
-$ownedHome = Assert-Owned (Join-Path $root 'home') $root
+$ownedHome = $(if ($Mcp115) { Assert-Owned (Join-Path $root 'home') $root } else { [IO.Path]::GetFullPath($env:USERPROFILE) })
+if (-not $Mcp115) {
+    # Explorer relaunch uses the actual account's default paths. This is a
+    # disposable hosted account, and existing user/agent directories must be absent.
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $ownedHome '.pdr-kocum-agent'))) 'Runner CyberFi home must start absent'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $ownedHome '.agents/skills'))) 'Existing runner agents must never be changed'
+}
 # NSIS relaunch has no user-data-dir argument; use its real default on the disposable runner.
-$userData = $(if ($Mcp115) { Assert-Owned (Join-Path $root 'user-data') $root } else { Assert-Owned (Join-Path $env:APPDATA 'CyberFi') $env:APPDATA })
+$userData = $(if ($Mcp115) { Assert-Owned (Join-Path $root 'user-data') $root } else { Assert-Owned (Join-Path $env:APPDATA 'PDR Koçum Agent') $env:APPDATA })
 Assert-True (-not (Test-Path -LiteralPath $userData)) 'Runner CyberFi profile must start empty'
-$happy = Join-Path $ownedHome '.happy'
+$happy = Join-Path $ownedHome '.pdr-kocum-agent/.happy'
 New-Item -ItemType Directory -Path $ownedHome, $userData -Force | Out-Null
 if (-not $Mcp115) { New-Item -ItemType Directory -Path $happy -Force | Out-Null }
 
@@ -269,7 +275,7 @@ if (-not (Test-Path -LiteralPath $settings)) {
     New-Item -ItemType Directory -Path (Split-Path $settings) -Force | Out-Null
     '{"appearance":"dark","defaultPermissionMode":"read_only"}' | Set-Content -LiteralPath $settings -Encoding utf8
 }
-$mcp = Join-Path $ownedHome 'happy/config/mcp.toml'
+$mcp = Join-Path $ownedHome '.pdr-kocum-agent/happy/config/mcp.toml'
 $skill = Join-Path $ownedHome '.agents/skills/acceptance-sentinel/SKILL.md'
 New-Item -ItemType Directory -Path (Split-Path $mcp), (Split-Path $skill) -Force | Out-Null
 "[mcp_servers.acceptance_sentinel]`nenabled = false`ncommand = 'node'`nargs = ['--version']`n" | Set-Content $mcp -Encoding utf8
