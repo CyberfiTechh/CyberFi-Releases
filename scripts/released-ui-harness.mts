@@ -1,5 +1,6 @@
 import { happyAgentClientCreate } from "../packages/happy-desktop-gym/sources/electron/happyAgentProtocol.ts";
 import assert from "node:assert/strict";
+import { setTimeout as nodeDelay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
@@ -45,7 +46,7 @@ async function pdfLoadObserve(page: any, selector: string): Promise<() => Promis
     return async () => {
         try {
             await page.waitForFunction((key: string) => (window as any).__cyberfiQaPdfLoads?.[key]?.loaded === true, key, { timeout: 20000 });
-            await page.waitForTimeout(750);
+            await nodeDelay(750);
         } finally {
             await page.evaluate((key: string) => {
                 const observations = (window as any).__cyberfiQaPdfLoads;
@@ -54,6 +55,27 @@ async function pdfLoadObserve(page: any, selector: string): Promise<() => Promis
             }, key).catch(() => {});
         }
     };
+}
+async function pdfDiagnostics(app: any, stage: string): Promise<void> {
+    const pages = app.context().pages();
+    const native = await app.evaluate(async ({ BrowserWindow, webContents }: any) => {
+        const windows = BrowserWindow.getAllWindows();
+        const main = windows[0]?.webContents;
+        let body: any;
+        try { body = await main?.executeJavaScript(`({text: document.body.innerText.slice(0,6000), frames: [...document.querySelectorAll('iframe')].map(frame => ({title: frame.title, src: frame.src, width: frame.getBoundingClientRect().width, height: frame.getBoundingClientRect().height}))})`); }
+        catch (error) { body = { error: String(error) }; }
+        return {
+            windows: windows.map((window: any) => {
+                const contents = window.webContents;
+                const preferences = contents.getLastWebPreferences();
+                return { id: window.id, visible: window.isVisible(), url: contents.getURL(), destroyed: contents.isDestroyed(), crashed: contents.isCrashed?.() ?? null,
+                    preferences: { plugins: preferences.plugins ?? null, sandbox: preferences.sandbox ?? null, webSecurity: preferences.webSecurity ?? null, contextIsolation: preferences.contextIsolation ?? null, nodeIntegration: preferences.nodeIntegration ?? null } };
+            }),
+            contents: webContents.getAllWebContents().map((contents: any) => ({ id: contents.id, kind: contents.getType(), url: contents.getURL(), destroyed: contents.isDestroyed(), crashed: contents.isCrashed?.() ?? null })),
+            renderProcessGone: (globalThis as any).__cyberfiQaRenderGone ?? [], body,
+        };
+    });
+    (report.pdfDiagnostics ??= []).push({ stage, playwrightPages: pages.map((page: any) => ({ url: page.url(), closed: page.isClosed() })), playwrightEvents: [...(report.playwrightPageEvents ?? [])], native });
 }
 const rendererRoot = resolve(report.renderer);
 const mime: any = {
@@ -211,6 +233,13 @@ try {
         for (const contents of webContents.getAllWebContents()) watch(contents);
         app.on("web-contents-created", (_event: any, contents: any) => watch(contents));
     });
+    report.playwrightPageEvents = [];
+    const watchPage = (page: any) => {
+        page.on("crash", () => report.playwrightPageEvents.push({ event: "crash", url: page.url() }));
+        page.on("close", () => report.playwrightPageEvents.push({ event: "close", url: page.url() }));
+    };
+    for (const page of app.context().pages()) watchPage(page);
+    app.context().on("page", watchPage);
     report.clipboardBackup = await app.evaluate(async ({ clipboard, ClipboardItem }: any) => {
         const readItems = await clipboard.read();
         // macOS may return a zero-MIME placeholder for an empty clipboard.
@@ -565,11 +594,12 @@ try {
         } else {
             await page.getByRole("button", { name: "İndir", exact: true }).first().waitFor();
         }
-        assert.equal(await page.getByRole("textbox").first().isVisible(), true, "Chat composer remains visible");
-        assert.equal(await page.getByText("Üçgenin iç açıları toplamı 180 derecedir.", { exact: false }).first().isVisible(), true, "Main conversation remains visible");
+        await pdfDiagnostics(app, "chat-right-original-load");
         await gymElectronInvisibleAssert(app);
         const png = await app.evaluate(async ({ BrowserWindow }: any) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true })).toPNG().toString("base64"));
         await writeFile(resolve(".context/cyberfi-115-integrated-chat-pdf-right.png"), Buffer.from(png, "base64"));
+        assert.equal(await page.getByRole("textbox").first().isVisible(), true, "Chat composer remains visible");
+        assert.equal(await page.getByText("Üçgenin iç açıları toplamı 180 derecedir.", { exact: false }).first().isVisible(), true, "Main conversation remains visible");
         await close.click();
         return { rightPreviewTab: true, chatAndComposerVisible: true, nativePdfViewerEnabled: enabled, frameSourcePresent: Boolean(frameSource), readablePageVisuallyVerified: false };
     });
@@ -662,6 +692,7 @@ try {
         assert.equal(sha256, expectedPdf.sha256);
         await waitGlobalPdf();
         const pdfEvidence = { loaded: true, readSucceeded: true, transport: "authorized-native-SDK", artifactId: artifact.id, signature, bytes: bytes.length, sha256 };
+        await pdfDiagnostics(app, "global-pdf-original-load");
         await captureOutput("pdf");
         await open("qa-support.docx");
         const officeCard = page.locator(".happy-agent-artifact-viewer__file-card").filter({ hasText: "qa-support.docx" });
