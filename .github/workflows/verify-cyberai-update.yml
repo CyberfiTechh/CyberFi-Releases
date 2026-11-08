@@ -1,5 +1,5 @@
 name: Verify CyberAI published native automatic update
-run-name: CyberAI public125 automatic update ${{ inputs.target }}
+run-name: CyberAI public126 automatic update ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -46,7 +46,7 @@ jobs:
               env:
                   TARGET: ${{ inputs.target }}
                   ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
-                  ACCEPTANCE_SOURCE_SHA: ac2f66476304f69e39913d5726b34f65ea7698ab
+                  ACCEPTANCE_SOURCE_SHA: 357ec9398a646c3f2853437f1adf285e2a961a4f
                   GH_TOKEN: ${{ github.token }}
                   CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI125_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
                   CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI125_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}

@@ -1,5 +1,5 @@
 name: Verify native CyberAI login and remembered account
-run-name: CyberAI 125 native login ${{ inputs.target }}
+run-name: CyberAI 126 native login ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -9,11 +9,11 @@ on:
                 required: true
             artifacts_json:
                 type: string
-                description: Reviewed draft125 releaseId, assetId, sha256, manifestAssetId, manifestSha256
+                description: Reviewed draft126 releaseId, assetId, sha256, manifestAssetId, manifestSha256
                 required: true
             source_sha:
                 type: string
-                description: Reviewed private source125 full commit SHA
+                description: Reviewed private source126 full commit SHA
                 required: true
 permissions:
     contents: read

@@ -13,39 +13,39 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 const REPOSITORY = "CyberfiTechh/CyberFi-Releases";
-const SOURCE_COMMIT = "ac2f66476304f69e39913d5726b34f65ea7698ab";
+const SOURCE_COMMIT = "357ec9398a646c3f2853437f1adf285e2a961a4f";
 const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA09ZxJMbpq1uFEnz7n52M\nAJtceCXVQCo57lgwMAmizgJaGVGsgsMpzqgCCRgXBN+bPygE+16S9XwYOwHDlnNG\noq8h+bE9Nxce3PzsQHrscdHTT1lGQ/5XwSmvzTvxLdURtQWpaXZl7lJghUnZHNDA\n8SOHbk8rQ+butE82lhcq0C+hgJgHTUqFl9Irppi2O+MpufsZo8PX5jphD4H0aX0k\nB9P+LUreoBmG/L3T3AMZEzQZG606awc/ZMYsJcJkt4xNMjR3ZMz1aWKErW2AXDeY\nyfAo0zmEAUEAFSc3UEJRnmBAjorVA3C/rHJzYP7QabSh8ORLOUrqQYgqCpTLETpf\nct0J+NphCLuBGNQ5IeId5IPiBNZlKynGzP/HK+oJTvJ31hTHIiaA+5pfIESXELIZ\nJ5awYGW0y7fii0CqRGwFMJnU829APVvAC9LJUzSSz7NP+2rmc/boYInx8cjN2/LO\nLI9HsPvON+oxM4MhjRxDd4CVoKDpI+rB2TthSdfxt3UxAgMBAAE=\n-----END PUBLIC KEY-----";
 const REVIEWED_ARTIFACTS = {
     "x64": {
         "source": {
-            "releaseId": 438276169,
-            "assetId": 724073607,
-            "sha256": "3aa128f391f9d80069dcc2fd9732917262da810fbd2105234b0f56caff65a4e3",
-            "manifestAssetId": 724081039,
-            "manifestSha256": "f5f99a756e29e80baa3afeb116586e9bd7a5af93f5f9593ff4fbb4fd6d67f8c2"
-        },
-        "target": {
             "releaseId": 438341391,
             "assetId": 724386918,
             "sha256": "0b3751cff8fa9a25a749d669151db00247f85f9eee48451aec6a3d1405689ee5",
             "manifestAssetId": 724396565,
             "manifestSha256": "27a3a0b1e3e2707131e0db987c421cc95975af26bb3dd2c14d303b22abd33ab9"
+        },
+        "target": {
+            "releaseId": 438482632,
+            "assetId": 725023562,
+            "sha256": "1ba5a3d397b9965ffb67b99082cf4c2922621d7e81b34caee9e63f31afd344d7",
+            "manifestAssetId": 725030750,
+            "manifestSha256": "0b0e2c82d22f335e483910d59bd23dd84c2478b38078c5114e9eb5c4a8542f1a"
         }
     },
     "arm64": {
         "source": {
-            "releaseId": 438276169,
-            "assetId": 724081124,
-            "sha256": "77782613c5cff5e46ca8fe72f22fbf68ebaf3dbd5ae6865cfd512899f67d68fa",
-            "manifestAssetId": 724088620,
-            "manifestSha256": "e8144f2910a7b576f18a6c4c55165d1a0cbffe3ad4c14b6b62526e29ec378112"
-        },
-        "target": {
             "releaseId": 438341391,
             "assetId": 724396687,
             "sha256": "2cc9ca341098606b71fbed585d36d7076760d98c9e28eaf0b4c560937aec53b3",
             "manifestAssetId": 724404110,
             "manifestSha256": "f1e25b4f003b94741d0563f3276561e60b09f7ee52503713823315c4103616cf"
+        },
+        "target": {
+            "releaseId": 438482632,
+            "assetId": 725030864,
+            "sha256": "d201129a5c0a67d4b90e129737601593c3890d5e08295a8c0794d630bfed752a",
+            "manifestAssetId": 725037487,
+            "manifestSha256": "44891892cf7469b5b945071d323c18d949542ae4dddbd799f92cd9222c7924b0"
         }
     }
 };
@@ -123,7 +123,7 @@ async function main() {
     const evidence = join(root, "evidence"), apps = join(root, "Applications"), profile = join(root, "user-data");
     await Promise.all([evidence, apps, profile].map(path => mkdir(path)));
     const app = join(apps, "CyberFi.app"), executable = join(app, "Contents/MacOS/CyberFi");
-    const report = { success: false, stage: "artifact verification", architecture: arch, sourceCommit: SOURCE_COMMIT, sourceVersion: "0.0.124", targetVersion: "0.0.125",
+    const report = { success: false, stage: "artifact verification", architecture: arch, sourceCommit: SOURCE_COMMIT, sourceVersion: "0.0.125", targetVersion: "0.0.126",
         actualGui: false, progress: [], events: [], errors: [], limits: ["macOS startup may transiently report regular Dock activation policy; full Dock absence is not certified.", "CI launches do not prove Gatekeeper acceptance of a browser-quarantined download."] };
     const save = () => writeFile(join(evidence, "automatic-update.json"), JSON.stringify(report, null, 2) + "\n");
     const token = process.env.GH_TOKEN, username = process.env.CYBERAI_USERNAME, password = process.env.CYBERAI_PASSWORD;
@@ -169,7 +169,7 @@ async function main() {
     }
     try {
         const proofs = {};
-        for (const [kind, version] of [["source", "0.0.124"], ["target", "0.0.125"]]) {
+        for (const [kind, version] of [["source", "0.0.125"], ["target", "0.0.126"]]) {
             report.stage = kind === "source" ? "published source metadata" : "published target metadata";
             const pin = pins[kind], release = await api(`repos/${REPOSITORY}/releases/${pin.releaseId}`);
             assert(publishedReleaseMatches(release, pin.releaseId, "macos-v" + version));
@@ -196,12 +196,12 @@ async function main() {
             if (kind === "source") await command("/usr/bin/ditto", ["--rsrc", "--extattr", "--acl", bundle, app]);
         }
         assert.deepEqual(await bundleProof(app), proofs.source);
-        report.immutableInputs = { pins, sourceFixture: "Public124 source", target: "Public125 target", independentRsaManifests: true, packagedBundleProofs: proofs, fusesModified: false, quarantineModified: false };
+        report.immutableInputs = { pins, sourceFixture: "Public125 source", target: "Public126 target", independentRsaManifests: true, packagedBundleProofs: proofs, fusesModified: false, quarantineModified: false };
         await save();
         report.stage = "pinned engine metadata and download";
-        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438140439");
-        const enginePins = arch === "x64" ? [723463097, "512bbe2b6eabe31121703b81e30a916b29c7a95cadb9ea8dd486bbdab16211ad"] : [723463093, "708418ebdfa9066a3b54c9f089d4e9e079f21ec3347ff6198668d6f32d7d5f77"];
-        assert(engineRelease.tag_name === "v0.4.118" && !engineRelease.draft);
+        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438481860");
+        const enginePins = arch === "x64" ? [725045506, "91e960dffbf7051133a8a16bbb250bb4870feb7bde23ec346e72d4d9b091346f"] : [725045505, "023946bd5e781cd5db5af5ed911324e3bfaa9b98e3a47632af9172f777f25011"];
+        assert(engineRelease.tag_name === "v0.4.119" && !engineRelease.draft);
         const engineAsset = engineRelease.assets.find(item => item.id === enginePins[0]);
         assert(engineAsset?.digest === "sha256:" + enginePins[1]);
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
@@ -222,19 +222,19 @@ async function main() {
         const { happyAgentBinarySelected } = await import(desktopMain("happyAgentBinaryConfig"));
         const { happyAgentReleaseInstall } = await import(desktopMain("happyAgentRelease"));
         const cachePaths = happyDaemonPaths({ HAPPY_HOME_DIR: paths.happyHome }, paths.home);
-        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.118");
+        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.119");
         assert(cachedEngine.startsWith(paths.root + sep) && cachePaths.binaryConfigPath.startsWith(paths.root + sep));
         await mkdir(dirname(cachedEngine), { recursive: true, mode: 0o700 });
         await copyFile(engine, cachedEngine, constants.COPYFILE_EXCL); await chmod(cachedEngine, 0o700);
         const extractedBinarySha = await hashFile(engine); assert.equal(await hashFile(cachedEngine), extractedBinarySha);
         // Consume verified cached bytes through the normal lock/data-floor/
         // atomic-selection producer. No fetch interception or forged status.
-        const installed = await happyAgentReleaseInstall({ version: "0.4.118", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
-        assert(installed.version === "0.4.118" && installed.path === cachedEngine);
+        const installed = await happyAgentReleaseInstall({ version: "0.4.119", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
+        assert(installed.version === "0.4.119" && installed.path === cachedEngine);
         assert.deepEqual(await happyAgentBinarySelected(cachePaths), installed);
-        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.118");
+        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.119");
         const managedCacheConfig = JSON.parse(await readFile(cachePaths.binaryConfigPath, "utf8"));
-        assert.deepEqual(managedCacheConfig, { downloadedVersions: ["0.4.118"], selectedVersion: "0.4.118" });
+        assert.deepEqual(managedCacheConfig, { downloadedVersions: ["0.4.119"], selectedVersion: "0.4.119" });
         report.managedEnginePrecondition = { producer: "pinned upstream happyAgentReleaseInstall consuming verified cached bytes", version: installed.version, executableSha256: extractedBinarySha, config: managedCacheConfig, fetchOverridden: false, dataVersionFabricated: false };
 
         const inferenceToken = randomBytes(24).toString("hex"); let inferenceCalls = 0;
@@ -314,6 +314,19 @@ async function main() {
         video = await gymElectronVideoRecord(page, { path: join(evidence, "actual-source-update.webm"), fps: 5 });
         await page.evaluate(() => { localStorage.setItem("pdr-kocum-agent.language", "tr"); localStorage.setItem("happy.welcome.v1", JSON.stringify({ welcomeAcknowledged: true })); });
         await page.reload({ waitUntil: "commit" });
+        report.stage = "source125 protected login";
+        await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]') && !!document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"] input[name="password"]:not(:disabled)'), undefined, { timeout: 60000 });
+        await page.addStyleTag({ content: 'input[name="username"], input[name="password"] { color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }' });
+        const sourceLogin = page.locator('[data-happy-desktop-ui="cyberfi-account-login"]');
+        assert(await page.evaluate(async () => { try { await window.happyDesktop.runtimeGet(); return false; } catch { return true; } }), "Source125 must deny privileged IPC before login");
+        await sourceLogin.locator('input[name="username"]').fill(username); await sourceLogin.locator('input[name="password"]').fill(password);
+        assert.equal(await sourceLogin.getByRole("checkbox", { name: "Beni hatırla" }).isChecked(), false);
+        await sourceLogin.getByRole("button", { name: "Giriş yap", exact: true }).click();
+        await page.waitForFunction(async () => (await window.happyDesktop.cyberFiAccountGet()).status === "signedIn", undefined, { timeout: 60000 });
+        const sourceAccount = await page.evaluate(() => window.happyDesktop.cyberFiAccountGet());
+        assert(sourceAccount.user?.role === "user" && sourceAccount.remember === false && sourceAccount.username === username);
+        await assert.rejects(lstat(join(configDir, "cyberai-account.json")), { code: "ENOENT" });
+        report.sourceAuthenticated = true;
         await page.waitForFunction(async () => typeof window.happyDesktop?.runtimeGet === "function" && (await window.happyDesktop.runtimeGet()).phase === "ready", undefined, { timeout: 90000 });
         const oldPid = await listenerPid(); report.oldPid = oldPid;
         id(oldPid);
@@ -323,8 +336,8 @@ async function main() {
         const general = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await general.count()) await general.click();
         const select = page.locator("#cyberfi-settings-desktop-version"); await select.waitFor({ state: "visible", timeout: 60000 });
         await page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/iu }).first().click();
-        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(item => item.version === "0.0.125"), undefined, { timeout: 45000 });
-        await select.selectOption("0.0.125");
+        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(item => item.version === "0.0.126"), undefined, { timeout: 45000 });
+        await select.selectOption("0.0.126");
         const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu }); await button.waitFor({ state: "visible" });
         let ticket, ready, stagePath, oldExitObserved = false;
         monitor = Promise.all([(async () => {
@@ -336,7 +349,7 @@ async function main() {
                 }
                 if (stagePath && !ticket && await lstat(join(stagePath, "ready.json")).catch(error => { if (error.code !== "ENOENT") throw error; })) {
                     ticket = JSON.parse(await readFile(join(stagePath, "ticket.json"), "utf8"));
-                    if (ticket) assert(ticket.targetApp === app && ticket.userDataPath === profile && ticket.parentPid === oldPid && ticket.version === "0.0.125" && ticket.hidden === true);
+                    if (ticket) assert(ticket.targetApp === app && ticket.userDataPath === profile && ticket.parentPid === oldPid && ticket.version === "0.0.126" && ticket.hidden === true);
                 }
                 if (ticket && !ready) {
                     ready = await readFile(ticket.readyPath, "utf8").then(JSON.parse).catch(error => { if (error.code !== "ENOENT") throw error; });
@@ -390,7 +403,7 @@ async function main() {
             await delay(50);
         }
         assert(oldExitObserved && ticket && ready && receipt && result?.status === "acknowledged");
-        assert(receipt.nonce === ticket.nonce && result.nonce === ticket.nonce && receipt.version === "0.0.125" && receipt.executablePath === executable && receipt.pid !== oldPid);
+        assert(receipt.nonce === ticket.nonce && result.nonce === ticket.nonce && receipt.version === "0.0.126" && receipt.executablePath === executable && receipt.pid !== oldPid);
         assert(result.oldBundleRemoved === true, "The old bundle must only be removed after matching acknowledgment");
         await assert.rejects(lstat(ticket.candidatePath), { code: "ENOENT" });
         newPid = id(receipt.pid); assert(!alive(oldPid) && alive(newPid));
@@ -426,7 +439,7 @@ async function main() {
         report.authenticatedTargetChat = true; report.loginGateAcknowledgedBeforeLogin = true; report.sessionRemembered = false;
         await delay(1000); await page.screenshot({ path: join(evidence, "reopened-target.png"), mask: [page.getByText(username, { exact: true })] });
         report.reopenedRuntime = await page.evaluate(async () => { const value = await window.happyDesktop.runtimeGet(); return { phase: value.phase, currentVersion: value.update?.currentVersion }; });
-        assert.equal(await command("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", join(app, "Contents/Info.plist")]), "0.0.125");
+        assert.equal(await command("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", join(app, "Contents/Info.plist")]), "0.0.126");
         for (const [path, text] of sentinels) assert.equal(await readFile(path, "utf8"), text);
         const config = JSON.parse(await readFile(join(configDir, "config.json"), "utf8")); assert.equal(config.appearance, "dark"); assert.equal(config.defaultPermissionMode, "read_only");
         await runtime.client.health(); report.ownedEngineStillHealthy = true;
@@ -473,10 +486,10 @@ if (process.argv.includes("--self-test")) {
     const helper = apps + "/.cyberfi-update-00000000-0000-4000-a000-000000000000/CyberFiUpdater";
     const records = ownedProcessRecords(` 12 ${app}\n 13 ${helper}\n 14 /other/Applications/CyberFi.app/Contents/MacOS/CyberFi\n 15 /owned/Applications/OtherHelper\n 16 /owned/Applications/../other/CyberFiUpdater\n`, app, apps);
     assert.deepEqual(records.map(value => [value.pid, value.isHelper]), [[12, false], [13, true]]);
-    assert(publishedReleaseMatches({ id: 1, tag_name: "v0.0.125", draft: false }, 1, "v0.0.125"));
-    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.125", draft: true }, 1, "v0.0.125"));
-    assert(!publishedReleaseMatches({ id: 2, tag_name: "v0.0.125", draft: false }, 1, "v0.0.125"));
-    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.124", draft: false }, 1, "v0.0.125"));
+    assert(publishedReleaseMatches({ id: 1, tag_name: "v0.0.126", draft: false }, 1, "v0.0.126"));
+    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.126", draft: true }, 1, "v0.0.126"));
+    assert(!publishedReleaseMatches({ id: 2, tag_name: "v0.0.126", draft: false }, 1, "v0.0.126"));
+    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.125", draft: false }, 1, "v0.0.126"));
     const pin = { releaseId: 1, assetId: 2, manifestAssetId: 3, sha256: "a".repeat(64), manifestSha256: "b".repeat(64) };
     assert.deepEqual(artifactPins({ source: pin, target: pin }), { source: pin, target: pin });
     assert.throws(() => artifactPins({ source: { ...pin, assetId: -1 }, target: pin }));
@@ -485,6 +498,6 @@ if (process.argv.includes("--self-test")) {
     assert.throws(() => allowedRedirect("http://github.com/file"));
     assert.deepEqual(JSON.parse(('\uFEFF{"sha256":"' + "a".repeat(64) + '"}').replace(/^\uFEFF/u, "")), { sha256: "a".repeat(64) });
     assert.throws(() => JSON.parse('\uFEFF\uFEFF{}'.replace(/^\uFEFF/u, "")));
-    assert.throws(() => signedManifest({ sha256: "a".repeat(64), size: 10, signature: "A".repeat(512) }, "0.0.125", "CyberFi-0.0.125-x64.dmg", "a".repeat(64), 10));
+    assert.throws(() => signedManifest({ sha256: "a".repeat(64), size: 10, signature: "A".repeat(512) }, "0.0.126", "CyberFi-0.0.126-x64.dmg", "a".repeat(64), 10));
     console.log("Mac automatic update input, redirect and RSA refusal guards passed; no app or network used.");
 } else await main();
