@@ -26,13 +26,34 @@ const report: any = {
     errors: [],
     console: [],
 };
-async function pdfFrameLoad(frame: any): Promise<void> {
-    const loaded = await frame.evaluate((element: HTMLIFrameElement) => new Promise<boolean>(resolve => {
-        const timer = setTimeout(() => resolve(false), 15000);
-        element.addEventListener("load", () => { clearTimeout(timer); resolve(true); }, { once: true });
-        element.src = element.src;
-    }));
-    assert.equal(loaded, true, "Native PDF frame emits load");
+let pdfObservationCount = 0;
+async function pdfLoadObserve(page: any, selector: string): Promise<() => Promise<void>> {
+    const key = `pdf-${++pdfObservationCount}`;
+    // Capture the original mount's load before the card is clicked; never reload a native PDF.
+    await page.evaluate(({ key, selector }: any) => {
+        const observations = ((window as any).__cyberfiQaPdfLoads ??= {});
+        const state: any = { loaded: false };
+        state.listener = (event: Event) => {
+            const element = event.target;
+            if (!(element instanceof HTMLIFrameElement) || !element.matches(selector) || !element.src || element.src === "about:blank") return;
+            try { if (element.contentDocument?.URL === "about:blank") return; } catch {}
+            state.loaded = true;
+        };
+        observations[key] = state;
+        document.addEventListener("load", state.listener, true);
+    }, { key, selector });
+    return async () => {
+        try {
+            await page.waitForFunction((key: string) => (window as any).__cyberfiQaPdfLoads?.[key]?.loaded === true, key, { timeout: 20000 });
+            await page.waitForTimeout(750);
+        } finally {
+            await page.evaluate((key: string) => {
+                const observations = (window as any).__cyberfiQaPdfLoads;
+                if (observations?.[key]) document.removeEventListener("load", observations[key].listener, true);
+                if (observations) delete observations[key];
+            }, key).catch(() => {});
+        }
+    };
 }
 const rendererRoot = resolve(report.renderer);
 const mime: any = {
@@ -175,6 +196,20 @@ try {
             HAPPY_DESKTOP_GYM_ELECTRON_USER_DATA: profile,
         },
         timeout: 60000,
+    });
+    await app.evaluate(({ app, webContents }: any) => {
+        (globalThis as any).__cyberfiQaRenderGone = [];
+        const watched = new WeakSet();
+        const watch = (contents: any) => {
+            if (watched.has(contents)) return;
+            watched.add(contents);
+            const kind = contents.getType();
+            contents.on("render-process-gone", (_event: any, details: any) => {
+                (globalThis as any).__cyberfiQaRenderGone.push({ reason: details.reason, exitCode: details.exitCode, kind });
+            });
+        };
+        for (const contents of webContents.getAllWebContents()) watch(contents);
+        app.on("web-contents-created", (_event: any, contents: any) => watch(contents));
     });
     report.clipboardBackup = await app.evaluate(async ({ clipboard, ClipboardItem }: any) => {
         const readItems = await clipboard.read();
@@ -514,6 +549,7 @@ try {
             return true;
         });
     await run("chat PDF opens in right preview while main chat remains usable", async () => {
+        const waitPdf = await pdfLoadObserve(page, '[data-happy-desktop-ui="file-preview-document"][title="qa-support.pdf"]');
         await page.getByRole("button", { name: "qa-support.pdf dosyasını aç", exact: true }).click();
         await page.getByRole("tab", { name: /Önizleme/ }).waitFor();
         const close = page.getByRole("button", { name: "Önizlemeyi kapat", exact: true });
@@ -525,8 +561,7 @@ try {
             await frame.waitFor();
             frameSource = await frame.getAttribute("src");
             assert.ok(frameSource);
-            await pdfFrameLoad(frame);
-            await page.waitForTimeout(750);
+            await waitPdf();
         } else {
             await page.getByRole("button", { name: "İndir", exact: true }).first().waitFor();
         }
@@ -604,6 +639,7 @@ try {
         await page.getByRole("heading", { name: "Sürümler", exact: true }).waitFor();
         await historyToggle.click();
         await page.waitForFunction(() => Array.from(document.images).some(image => image.naturalWidth === 400 && image.naturalHeight === 220 && image.closest('[data-happy-desktop-ui="happy-agent-artifact-viewer"]')));
+        const waitGlobalPdf = await pdfLoadObserve(page, 'iframe[data-happy-desktop-ui="happy-agent-artifact-document"]');
         await open("qa-support.pdf");
         const pdf = page.locator('iframe[data-happy-desktop-ui="happy-agent-artifact-document"]').first();
         await pdf.waitFor();
@@ -624,8 +660,7 @@ try {
         assert.equal(signature, "%PDF-");
         assert.equal(bytes.length, expectedPdf.size);
         assert.equal(sha256, expectedPdf.sha256);
-        await pdfFrameLoad(pdf);
-        await page.waitForTimeout(750);
+        await waitGlobalPdf();
         const pdfEvidence = { loaded: true, readSucceeded: true, transport: "authorized-native-SDK", artifactId: artifact.id, signature, bytes: bytes.length, sha256 };
         await captureOutput("pdf");
         await open("qa-support.docx");
@@ -641,30 +676,33 @@ try {
 } catch (e) {
     report.fatal = String(e);
 } finally {
+    // Diagnostics may fail after a renderer crash; they must never skip clipboard restoration.
     if (app) {
-        const page = await app.firstWindow().catch(() => undefined);
-        if (page) report.finalText = (await page.locator("body").innerText()).slice(0, 6000);
+        try {
+            const page = await app.firstWindow({ timeout: 2000 }).catch(() => undefined);
+            if (page) report.finalText = (await page.locator("body").innerText({ timeout: 2000 })).slice(0, 6000);
+        } catch (error) { report.finalTextError = String(error); }
+        try { report.renderProcessGone = await app.evaluate(() => (globalThis as any).__cyberfiQaRenderGone ?? []); }
+        catch (error) { report.renderProcessGoneReadError = String(error); }
     }
-    if (video) await video.stop().catch((e: any) => report.errors.push(String(e)));
-    if (app && clipboardBefore)
-        await app
-            .evaluate(async ({ clipboard }: any) => {
+    report.clipboardRestored = false;
+    if (app && clipboardBefore) {
+        try {
+            await app.evaluate(async ({ clipboard }: any) => {
                 const items = (globalThis as any).__cyberfiQaClipboard;
                 if (items.length > 0) await clipboard.write(items);
-                else clipboard.clear();
+                else await clipboard.clear();
                 delete (globalThis as any).__cyberfiQaClipboard;
-            })
-            .catch((error: any) =>
-                report.errors.push("Clipboard restoration failed: " + String(error)),
-            );
-    if (app) await app.close().catch(() => {});
-    if (runtime) await runtime.stop().catch(() => {});
-    await gymRunClean(paths.root);
+            });
+            report.clipboardRestored = true;
+        } catch (error) { report.errors.push("Clipboard restoration failed: " + String(error)); }
+    }
+    if (video) await video.stop().catch((error: any) => report.errors.push(String(error)));
+    if (app) await app.close().catch((error: any) => report.errors.push("App cleanup failed: " + String(error)));
+    if (runtime) await runtime.stop().catch((error: any) => report.errors.push("Runtime cleanup failed: " + String(error)));
+    await gymRunClean(paths.root).catch((error: any) => report.errors.push("Run cleanup failed: " + String(error)));
     synthetic.close();
     server.close();
-    await writeFile(
-        resolve(".context/cyberfi-115-integrated-qa-report.json"),
-        JSON.stringify(report, null, 2),
-    );
+    await writeFile(resolve(".context/cyberfi-115-integrated-qa-report.json"), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
 }
