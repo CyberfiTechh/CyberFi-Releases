@@ -26,6 +26,14 @@ const report: any = {
     errors: [],
     console: [],
 };
+async function pdfFrameLoad(frame: any): Promise<void> {
+    const loaded = await frame.evaluate((element: HTMLIFrameElement) => new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => resolve(false), 15000);
+        element.addEventListener("load", () => { clearTimeout(timer); resolve(true); }, { once: true });
+        element.src = element.src;
+    }));
+    assert.equal(loaded, true, "Native PDF frame emits load");
+}
 const rendererRoot = resolve(report.renderer);
 const mime: any = {
     ".html": "text/html",
@@ -517,6 +525,8 @@ try {
             await frame.waitFor();
             frameSource = await frame.getAttribute("src");
             assert.ok(frameSource);
+            await pdfFrameLoad(frame);
+            await page.waitForTimeout(750);
         } else {
             await page.getByRole("button", { name: "İndir", exact: true }).first().waitFor();
         }
@@ -597,21 +607,26 @@ try {
         await open("qa-support.pdf");
         const pdf = page.locator('iframe[data-happy-desktop-ui="happy-agent-artifact-document"]').first();
         await pdf.waitFor();
-        const pdfEvidence = await pdf.evaluate(async (frame: HTMLIFrameElement) => {
-            const url = frame.src;
-            const response = await fetch(url);
-            const bytes = new Uint8Array(await response.arrayBuffer());
-            const loaded = await new Promise<boolean>(resolve => {
-                const timer = setTimeout(() => resolve(false), 15000);
-                frame.addEventListener("load", () => { clearTimeout(timer); resolve(true); }, { once: true });
-                frame.src = url;
-            });
-            return { loaded, status: response.status, signature: new TextDecoder().decode(bytes.slice(0, 5)), bytes: bytes.length };
-        });
-        assert.equal(pdfEvidence.loaded, true, "Native PDF frame emits load");
-        assert.equal(pdfEvidence.status, 200);
-        assert.equal(pdfEvidence.signature, "%PDF-");
-        assert.equal(pdfEvidence.bytes, outputFixtures.find((item: any) => item.name === "qa-support.pdf").size);
+        const expectedPdf = outputFixtures.find((item: any) => item.name === "qa-support.pdf");
+        const api = happyAgentClientCreate(runtime.socketPath, runtime.token);
+        const record = report.sharedOutputRecords.find((item: any) => item.name === "qa-support.pdf");
+        assert.ok(record, "PDF has an actual shared artifact identity");
+        const artifact = (await api.getArtifact(record.artifactId)).artifact;
+        const version = (await api.getArtifactVersion(artifact.id, artifact.latestVersion)).version;
+        const payload = version.files.find((file: any) => file.mimeType === "application/pdf" && file.sha256 === expectedPdf.sha256);
+        assert.ok(payload, "PDF payload manifest matches pinned synthetic fixture");
+        // Read through the authorized native SDK; CSP correctly forbids parent fetch(blob:).
+        const stored = await api.getArtifactFile(artifact.id, artifact.latestVersion, payload.path);
+        assert.ok(stored, "Authorized SDK PDF read succeeds");
+        const bytes = Buffer.from(stored.data);
+        const signature = bytes.subarray(0, 5).toString("ascii");
+        const sha256 = createHash("sha256").update(bytes).digest("hex");
+        assert.equal(signature, "%PDF-");
+        assert.equal(bytes.length, expectedPdf.size);
+        assert.equal(sha256, expectedPdf.sha256);
+        await pdfFrameLoad(pdf);
+        await page.waitForTimeout(750);
+        const pdfEvidence = { loaded: true, readSucceeded: true, transport: "authorized-native-SDK", artifactId: artifact.id, signature, bytes: bytes.length, sha256 };
         await captureOutput("pdf");
         await open("qa-support.docx");
         const officeCard = page.locator(".happy-agent-artifact-viewer__file-card").filter({ hasText: "qa-support.docx" });
