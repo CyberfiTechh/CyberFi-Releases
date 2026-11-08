@@ -424,7 +424,6 @@ async function main() {
         await mkdir(application);
         extractReleasedAsar(asarReader(upstream), join(resources, "app.asar"), application);
         const runtimeModules = join(resources, "node_modules");
-        await safeResourceLinks(runtimeModules);
         const extractedModules = join(application, "node_modules");
         const extractedStat = await lstat(extractedModules).catch((error) => {
             if (error.code !== "ENOENT") throw error;
@@ -432,7 +431,10 @@ async function main() {
         if (extractedStat) {
             assert(extractedStat.isDirectory());
             await safeResourceLinks(extractedModules);
-        } else await symlink(runtimeModules, extractedModules);
+        } else {
+            await safeResourceLinks(runtimeModules);
+            await symlink(runtimeModules, extractedModules);
+        }
         const publicDist = join(upstream, "packages/happy-desktop-electron/dist");
         await absent(publicDist);
         await symlink(join(application, "dist"), publicDist);
