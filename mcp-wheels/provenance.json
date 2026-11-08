@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "cryptography": "50.0.2",
+  "openssl": "OpenSSL 4.0.3 29 Sep 2026",
+  "smokePython": "3.12.10 (v3.12.10:0cc81280367, Apr  8 2025, 08:47:00) [Clang 13.0.0 (clang-1300.0.29.30)]",
+  "architecture": "x86_64",
+  "wheel": "cryptography-50.0.2-cp311-abi3-macosx_11_0_x86_64.whl",
+  "wheelSHA256": "951d2b614f3f0794dd72f539e4fc5efb8461d111999742a610bd0f2c9cd95573",
+  "dynamicLibraries": "/Users/runner/work/_temp/crypto-wheel-build/smoke-venv/lib/python3.12/site-packages/cryptography/hazmat/bindings/_rust.abi3.so:\n\t@rpath/cryptography.hazmat.bindings._rust.abi3.so (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)\n",
+  "rustRequiredAtRuntime": false,
+  "rsaAndJwtAndFernetPassed": true,
+  "sources": {
+    "cryptography50.0.2": "7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5",
+    "openssl4.0.3": "325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9"
+  },
+  "metadataOnlyPatch": "Include upstream OpenSSL license; cryptography source code unchanged",
+  "workflowCommit": "9995b8d093bf9aa6fdc5e6a8ea033e46f987900e",
+  "run": "https://github.com/CyberfiTechh/CyberFi-Releases/actions/runs/42431234335",
+  "hostedToolchain": {
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)\n",
+    "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)\n",
+    "clang": "Apple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: x86_64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+    "sdk": "15.5\n",
+    "build-python": "Python 3.11.9\n",
+    "openssl": "OpenSSL 4.0.3 29 Sep 2026 (Library: OpenSSL 4.0.3 29 Sep 2026)\n"
+  }
+}
