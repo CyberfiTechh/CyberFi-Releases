@@ -25,7 +25,8 @@ const save = () => writeFile(join(evidence, "in-app-update.json"), JSON.stringif
 const gymPath = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
 const { gymElectronProcessRun, gymElectronVideoRecord } = await import(gymPath("launch"));
 const { gymRunPathsCreate, gymRunClean } = await import(gymPath("paths"));
-const { happyAgentRuntimeCreate } = await import(gymPath("happyAgentRuntime"));
+const { gymHostEnvironment } = await import(gymPath("hostEnvironment"));
+const { happyAgentClientCreate } = await import(gymPath("happyAgentProtocol"));
 const require = createRequire(join(upstream, "packages/happy-desktop-gym/package.json"));
 const { chromium } = require("playwright");
 const { paths } = await gymRunPathsCreate("smoke");
@@ -46,14 +47,73 @@ async function processes() {
     const parsed = stdout.trim() ? JSON.parse(stdout) : [];
     return Array.isArray(parsed) ? parsed : [parsed];
 }
+async function ownedEngineStart() {
+    // Use the official CLI/config/client contract. Keep ordinary Windows system
+    // environment entries; override every data/home path with the owned gym paths.
+    const token = randomBytes(24).toString("hex");
+    const own = { ...gymHostEnvironment(paths), HAPPY_HOME_DIR: paths.happyHome,
+        HAPPY_AGENT_PROJECTS_DIRECTORY: paths.projects, HAPPY_AGENT_WORKSPACES_DIRECTORY: paths.workspaces,
+        HAPPY_AGENT_SERVER_SOCKET_PATH: paths.socketPath, HAPPY_AGENT_SERVER_TOKEN_PATH: paths.tokenPath,
+        HAPPY_GYM_INFERENCE_URL: `http://127.0.0.1:${inference.address().port}/inference`, HAPPY_GYM_TOKEN: token };
+    const systemNames = new Set(["path", "systemroot", "windir", "comspec", "pathext", "psmodulepath",
+        "systemdrive", "programfiles", "programfiles(x86)", "programw6432", "commonprogramfiles",
+        "commonprogramfiles(x86)", "commonprogramw6432", "programdata", "allusersprofile", "public",
+        "userdomain", "userdnsdomain", "username", "computername", "os", "processor_architecture",
+        "processor_identifier", "number_of_processors", "sessionname"]);
+    const system = Object.fromEntries(Object.entries(env).filter(([key]) => systemNames.has(key.toLowerCase())));
+    const engineEnv = { ...system, ...own };
+    const config = join(paths.root, "happy/config");
+    await mkdir(config, { recursive: true });
+    for (const path of [".config", ".cache", ".local/share", ".local/state", "AppData/Local", "AppData/Roaming"])
+        await mkdir(join(paths.home, path), { recursive: true });
+    await writeFile(join(config, "happy.toml"), '[settings]\nhappy_integration = false\nmenu_bar = false\n\n[providers.codex]\ntype = "codex"\nenabled = true\ncredential_isolation = true\n');
+    // Read-only paired diagnostics: no ACL change or security-check bypass.
+    const probe = "$ErrorActionPreference='Stop';$d=Get-Item -LiteralPath $env:OWNED_DIRECTORY_PROBE -Force;@{edition=$PSVersionTable.PSEdition;version=$PSVersionTable.PSVersion.ToString();directory=$d.FullName;attributes=$d.Attributes.ToString();owner=(Get-Acl -LiteralPath $d.FullName).Owner}|ConvertTo-Json -Compress";
+    report.engineEnvironmentProbe = [];
+    for (const [kind, variables] of [["public gym minimal environment", own], ["inherited system environment plus owned data paths", engineEnv]]) {
+        try {
+            const value = await exec(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", probe],
+                { env: { ...variables, OWNED_DIRECTORY_PROBE: paths.agentHome }, timeout: 15000, windowsHide: true });
+            report.engineEnvironmentProbe.push({ kind, success: true, result: JSON.parse(value.stdout) });
+        } catch (error) {
+            report.engineEnvironmentProbe.push({ kind, success: false, stderr: String(error.stderr ?? error.message).slice(-8000) });
+        }
+    }
+    await save();
+    const command = process.env.ACCEPTANCE_ENGINE_EXE;
+    const stop = () => exec(command, ["stop"], { cwd: paths.root, env: engineEnv, timeout: 15000, windowsHide: true }).catch(() => {});
+    await stop();
+    try {
+        await exec(command, ["start"], { cwd: paths.root, env: engineEnv, timeout: 75000, windowsHide: true, maxBuffer: 2 * 1024 * 1024 });
+        const until = Date.now() + 30000;
+        let client, healthy = false;
+        while (Date.now() < until) {
+            try {
+                const daemonToken = (await readFile(paths.tokenPath, "utf8")).trim();
+                if (daemonToken) {
+                    client = happyAgentClientCreate(paths.socketPath, daemonToken);
+                    await client.getHealth();
+                    healthy = true;
+                    break;
+                }
+            } catch { /* Official CLI is still publishing its authenticated endpoint. */ }
+            await delay(100);
+        }
+        assert(healthy && client, "Actual owned engine did not publish a healthy authenticated endpoint");
+        return { environment: engineEnv, client: { health: () => client.getHealth() }, stop };
+    } catch (error) {
+        await stop();
+        report.engineStartDetails = { code: error.code, stderr: String(error.stderr ?? "").slice(-16000), stdout: String(error.stdout ?? "").slice(-8000) };
+        throw error;
+    }
+}
 try {
     const engineVersion = (await exec(process.env.ACCEPTANCE_ENGINE_EXE, ["--version"], { env, timeout: 15000, windowsHide: true })).stdout.trim();
     assert.equal(engineVersion.split(/\s+/u).at(-1), "0.4.117-preview.1");
     report.engineFixture = { versionOutput: engineVersion, tag: "v0.4.117-preview.1",
         archiveSHA256: "2b0de452512defd491b5fc8e0b8df1c9dd77618ed164fbfbc7a0b37a9bef3a87",
-        reason: "Already verified deterministic native fixture; prior stable116 fixture ACL startup failed before Electron" };
-    runtime = await happyAgentRuntimeCreate(paths, { url: `http://127.0.0.1:${inference.address().port}/inference`,
-        token: randomBytes(24).toString("hex"), start: async () => {}, stop: async () => {} });
+        reason: "Published deterministic native fixture with normal Windows system environment and owned data paths; prior minimal-environment fixture starts failed before Electron" };
+    runtime = await ownedEngineStart();
     report.engineHealth = await runtime.client.health();
     // A legitimate persisted onboarding preference, matching the existing native gym.
     await writeFile(join(userData, "desktop/local-onboarding.json"), JSON.stringify({ version: 3, chiefOfStaffSetup: true }));
