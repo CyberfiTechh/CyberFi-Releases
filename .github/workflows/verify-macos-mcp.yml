@@ -6,7 +6,7 @@ on:
         inputs:
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118"]
+                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119"]
                 default: "0.0.115"
             architecture:
                 type: choice

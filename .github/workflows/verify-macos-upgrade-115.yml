@@ -6,7 +6,7 @@ on:
         inputs:
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118"]
+                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119"]
                 default: "0.0.115"
             target_sha256:
                 type: string
@@ -28,7 +28,7 @@ jobs:
         env:
             ARCH: ${{ inputs.architecture }}
             TARGET_VERSION: ${{ inputs.target_version || '0.0.115' }}
-            OLD_VERSION: ${{ inputs.target_version == '0.0.118' && '0.0.117' || (inputs.target_version == '0.0.116' || inputs.target_version == '0.0.117') && '0.0.115' || '0.0.114' }}
+            OLD_VERSION: ${{ (inputs.target_version == '0.0.118' || inputs.target_version == '0.0.119') && '0.0.117' || (inputs.target_version == '0.0.116' || inputs.target_version == '0.0.117') && '0.0.115' || '0.0.114' }}
             EXPECTED_NEW_SHA: ${{ inputs.target_sha256 }}
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -54,7 +54,7 @@ jobs:
             - name: Download the published native DMGs
               run: |
                   set -euo pipefail
-                  case "$TARGET_VERSION" in 0.0.115|0.0.116|0.0.117|0.0.118) ;; *) exit 1 ;; esac
+                  case "$TARGET_VERSION" in 0.0.115|0.0.116|0.0.117|0.0.118|0.0.119) ;; *) exit 1 ;; esac
                   case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
                   test "$(uname -m)" = "$native"
                   downloads="$RUNNER_TEMP/cyberfi-upgrade-downloads"

@@ -1,4 +1,4 @@
-param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
@@ -14,8 +14,8 @@ if ($TargetVersion -eq '0.0.117') {
     Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '117 requires an explicit immutable published installer digest'
     Assert-True ($TargetSha256 -ceq $expected['0.0.117']) 'Published117 immutable digest changed'
 }
-if ($TargetVersion -eq '0.0.118') {
-    Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '118 requires an explicit immutable published installer digest'
+if ($TargetVersion -in @('0.0.118','0.0.119')) {
+    Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '118/119 require an explicit immutable published installer digest'
     $expected[$TargetVersion] = $TargetSha256
 }
 
@@ -28,6 +28,7 @@ function Get-UpgradeSource([string]$Target) {
         '0.0.116' { '0.0.115' }
         '0.0.117' { '0.0.116' }
         '0.0.118' { '0.0.117' }
+        '0.0.119' { '0.0.118' }
         default { throw 'Unsupported upgrade target' }
     }
 }
@@ -53,11 +54,12 @@ if ($SelfCheck) {
     Assert-True ((Get-UpgradeSource '0.0.116') -eq '0.0.115') '116 source must remain115'
     Assert-True ((Get-UpgradeSource '0.0.117') -eq '0.0.116') '117 source must be116'
     Assert-True ((Get-UpgradeSource '0.0.118') -eq '0.0.117') '118 source must be117'
+    Assert-True ((Get-UpgradeSource '0.0.119') -eq '0.0.118') '119 source must be118'
 
     Assert-True ($expected.Count -in @(5, 6)) 'Only immutable pinned versions allowed'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
-        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118')) 'Unexpected version'
+        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118', '0.0.119')) 'Unexpected version'
     }
     Assert-True ($certificateThumbprint -cmatch '^[A-F0-9]{40}$') 'Invalid certificate pin'
     $null = Assert-Owned (Join-Path ([IO.Path]::GetTempPath()) 'owned/item') ([IO.Path]::GetTempPath())
