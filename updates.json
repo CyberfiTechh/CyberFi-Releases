@@ -1,5 +1,31 @@
 [
   {
+    "tag_name": "macos-v0.0.122",
+    "draft": false,
+    "assets": [
+      {
+        "id": 723821017,
+        "name": "CyberFi-0.0.122-arm64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 723826938,
+        "name": "CyberFi-0.0.122-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 723814795,
+        "name": "CyberFi-0.0.122-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 723820988,
+        "name": "CyberFi-0.0.122-x64.dmg.sha256",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "v0.0.122",
     "draft": false,
     "assets": [
