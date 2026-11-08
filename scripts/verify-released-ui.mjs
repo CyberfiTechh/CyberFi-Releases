@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
 const DESKTOP_REPO = "CyberfiTechh/CyberFi-Releases";
 const ENGINE_REPO = "CyberfiTechh/CyberFi-Engine";
 function desktopVersion(value) {
-    assert(["0.0.116", "0.0.117", "0.0.118", "0.0.119"].includes(value));
+    assert(["0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120"].includes(value));
     return value;
 }
 const UPSTREAM_COMMIT = "c9feffb54cdb3591220dafced4070e118e3d297a";
@@ -217,7 +217,8 @@ function selfTest() {
     assert.equal(desktopVersion("0.0.116"), "0.0.116");
     assert.equal(desktopVersion("0.0.118"), "0.0.118");
     assert.equal(desktopVersion("0.0.119"), "0.0.119");
-    assert.throws(() => desktopVersion("0.0.120"));
+    assert.equal(desktopVersion("0.0.120"), "0.0.120");
+    assert.throws(() => desktopVersion("0.0.121"));
     assert.throws(() => desktopVersion("0.0.115"));
     const sha = "a".repeat(64);
     const release = {
@@ -404,9 +405,13 @@ async function main() {
         const electronSha = desktopRequire("electron/checksums.json")[electronName];
         digest(electronSha);
         const electronZip = join(root, "stock-electron.zip");
+        const electronRelease = await apiJson(`repos/electron/electron/releases/tags/v${ELECTRON_VERSION}`);
+        const electronAsset = electronRelease.assets.find(asset => asset.name === electronName);
+        releaseAsset(electronRelease, { releaseId: String(electronRelease.id), assetId: String(electronAsset?.id), sha: electronSha, tag: `v${ELECTRON_VERSION}`, name: electronName });
         await download(
-            `https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/${electronName}`,
+            `https://api.github.com/repos/electron/electron/releases/assets/${electronAsset.id}`,
             electronZip,
+            true,
         );
         assert.equal(await hashFile(electronZip), electronSha);
         const stock = join(root, "stock-electron");

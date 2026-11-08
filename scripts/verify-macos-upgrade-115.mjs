@@ -15,12 +15,12 @@ const expected = {
     arm64: { old: "6629c214083e33ae7fdb317c87cf594defa46a34bb820a2022534851fd4f3977", new: "b3dc2cb6f5579f91bb0695c3abc968ba670a7f2ab6612614f88b4ce632dd0564" },
 };
 const newVersion = process.env.TARGET_VERSION || "0.0.115";
-assert(["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119"].includes(newVersion));
-const oldVersion = ["0.0.118", "0.0.119"].includes(newVersion) ? "0.0.117" : newVersion !== "0.0.115" ? "0.0.115" : "0.0.114";
+assert(["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120"].includes(newVersion));
+const oldVersion = ["0.0.118", "0.0.119", "0.0.120"].includes(newVersion) ? "0.0.117" : newVersion !== "0.0.115" ? "0.0.115" : "0.0.114";
 if (newVersion !== "0.0.115") {
     assert(/^[a-f0-9]{64}$/u.test(process.env.EXPECTED_NEW_SHA || ""), "The target requires the explicit published native DMG digest");
     const published117 = { x64: "10ded58d80f1ae7ae250c93e78c00a1faa433f36cc6fe63b66e14aa26af3e43e", arm64: "a212f2a9f56c9903af825858399384ae0b1f4c18d24b2fc1c97c43076fb7ba48" };
-    for (const arch of ["x64", "arm64"]) expected[arch] = { old: ["0.0.118", "0.0.119"].includes(newVersion) ? published117[arch] : expected[arch].new, new: process.env.EXPECTED_NEW_SHA };
+    for (const arch of ["x64", "arm64"]) expected[arch] = { old: ["0.0.118", "0.0.119", "0.0.120"].includes(newVersion) ? published117[arch] : expected[arch].new, new: process.env.EXPECTED_NEW_SHA };
 }
 const [sourceArgument, rootArgument, oldArgument, newArgument] = process.argv.slice(2);
 assert(sourceArgument && rootArgument && oldArgument && newArgument,
