@@ -204,7 +204,7 @@ async function main() {
         video = await gymElectronVideoRecord(page, { path: join(evidence, "actual-source-update.webm"), fps: 5 });
         await page.evaluate(() => { localStorage.setItem("pdr-kocum-agent.language", "tr"); localStorage.setItem("happy.welcome.v1", JSON.stringify({ welcomeAcknowledged: true })); });
         await page.reload({ waitUntil: "commit" });
-        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).phase === "ready", undefined, { timeout: 90000 });
+        await page.waitForFunction(async () => typeof window.happyDesktop?.runtimeGet === "function" && (await window.happyDesktop.runtimeGet()).phase === "ready", undefined, { timeout: 90000 });
         const oldPid = await listenerPid(); report.oldPid = oldPid;
         id(oldPid);
         const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
@@ -216,7 +216,7 @@ async function main() {
         await select.selectOption("0.0.124");
         const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu }); await button.waitFor({ state: "visible" });
         let ticket, ready, stagePath, oldExitObserved = false;
-        monitor = (async () => {
+        monitor = Promise.all([(async () => {
             while (!stop) {
                 if (!stagePath) {
                     const names = (await readdir(apps)).filter(name => /^\.cyberfi-update-[a-f0-9-]{36}$/u.test(name));
@@ -238,6 +238,10 @@ async function main() {
                     assert(ready, "Old app exited before an observed helper readiness handshake"); oldExitObserved = true;
                     report.events.push({ type: "old-parent-exited", at: Date.now() });
                 }
+                await delay(20);
+            }
+        })(), (async () => {
+            while (!stop) {
                 if (!oldExitObserved) {
                     try {
                         const state = await page.evaluate(async () => {
@@ -251,9 +255,9 @@ async function main() {
                         if (JSON.stringify(state) !== JSON.stringify(report.progress.at(-1))) report.progress.push(state);
                     } catch (error) { if (alive(oldPid) && !ready) throw error; }
                 }
-                await delay(20);
+                await delay(100);
             }
-        })().catch(error => { monitorError = error; });
+        })()]).catch(error => { monitorError = error; });
         await button.click(); report.actualGui = true;
         const until = Date.now() + 12 * 60000;
         while (!appExit && !appError && !monitorError && Date.now() < until) await delay(100);
