@@ -6,6 +6,8 @@ $report = [ordered]@{
     success = $false
     stage = 'hosted-runner-guard'
     nativeError = $null
+    localAccountsError = $null
+    accountCleanupError = $null
     fixtureSidVerified = $false
     elevated = $null
     administrator = $null
@@ -20,6 +22,21 @@ $fixture = $null
 $account = $null
 $accountAttempted = $false
 $password = $null
+
+function Get-LocalAccountsFailure([Management.Automation.ErrorRecord]$Record) {
+    $id = ([string]$Record.FullyQualifiedErrorId).Split(',')[0]
+    $knownIds = @(
+        'ParameterArgumentValidationError', 'ParameterArgumentTransformationError', 'NamedParameterNotFound',
+        'UserExists', 'UserNotFound', 'GroupNotFound', 'MemberExists', 'AccessDenied', 'InvalidPassword', 'PasswordTooShort'
+    )
+    $category = [string]$Record.CategoryInfo.Category
+    [ordered]@{
+        id = if ($id -cin $knownIds) { $id } else { 'other' }
+        type = if ($Record.Exception -is [Management.Automation.ParameterBindingException]) { 'parameter-binding' }
+               elseif ($Record.Exception -is [ComponentModel.Win32Exception]) { 'win32' } else { 'other' }
+        category = if ($category -cin @('InvalidArgument', 'InvalidData', 'InvalidOperation', 'ObjectNotFound', 'PermissionDenied', 'ResourceExists', 'SecurityError')) { $category } else { 'other' }
+    }
+}
 
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -172,11 +189,12 @@ public static class CyberFiStandardLaunch {
 }
 '@
 
-    $report.stage = 'create-owned-standard-user'
+    $report.stage = 'check-owned-account-name'
     $nonce = [Guid]::NewGuid().ToString('N')
     $accountName = 'cfprobe' + $nonce.Substring(0, 12)
-    $description = 'CyberFi owned launch preflight ' + $nonce
+    $description = 'cf-launch:' + $nonce
     if (Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue) { throw 'The fixture account name already exists.' }
+    $report.stage = 'generate-owned-account-credential'
     $random = [byte[]]::new(32)
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($random) } finally { $rng.Dispose() }
@@ -186,11 +204,15 @@ public static class CyberFiStandardLaunch {
         $password.MakeReadOnly()
     } finally { [Array]::Clear($random, 0, $random.Length) }
     $accountAttempted = $true
+    $report.stage = 'create-owned-standard-user'
     $account = New-LocalUser -Name $accountName -Password $password -Description $description -AccountExpires (Get-Date).AddMinutes(20)
+    $report.stage = 'verify-owned-account-sid'
     $accountSid = [Security.Principal.SecurityIdentifier]::new([string]$account.SID)
     if ($accountSid.Value -ceq $identity.User.Value) { throw 'The fixture must have its own SID.' }
     $usersGroup = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    $report.stage = 'read-standard-users-membership'
     if (-not (Get-LocalGroupMember -SID $usersGroup | Where-Object { [string]$_.SID -eq $accountSid.Value })) {
+        $report.stage = 'add-standard-users-membership'
         Add-LocalGroupMember -SID $usersGroup -Member $accountSid.Value
     }
 
@@ -249,6 +271,9 @@ exit 23
     $report.success = $report.environmentPreserved -and $report.exitCodePropagated -and $result.sidMatches -eq $true
 } catch {
     if ($report.stage -eq 'native-launch') { $report.stage = [CyberFiStandardLaunch]::Stage }
+    if ($report.stage -in @('check-owned-account-name', 'create-owned-standard-user', 'read-standard-users-membership', 'add-standard-users-membership')) {
+        $report.localAccountsError = Get-LocalAccountsFailure $_
+    }
     for ($cause = $_.Exception; $null -ne $cause; $cause = $cause.InnerException) {
         if ($cause -is [ComponentModel.Win32Exception]) { $report.nativeError = $cause.NativeErrorCode; break }
     }
@@ -263,7 +288,10 @@ exit 23
                 Remove-LocalUser -SID $candidate.SID
             }
             $report.accountRemoved = -not (Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue)
-        } catch { $report.accountRemoved = $false }
+        } catch {
+            $report.accountRemoved = $false
+            $report.accountCleanupError = Get-LocalAccountsFailure $_
+        }
     }
     if ($fixture) {
         try {
