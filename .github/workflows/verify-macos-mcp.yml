@@ -89,6 +89,9 @@ jobs:
             - name: Detach owned DMG
               if: always()
               run: hdiutil detach "$RUNNER_TEMP/CyberFi-MCP-DMG" || true
+            - name: Collect bounded fixed-equation diagnostics after a failure
+              if: failure()
+              run: node "$GITHUB_WORKSPACE/acceptance/scripts/diagnose-math-worker.mjs" "$HOME/CyberFi-mcp-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
@@ -97,6 +100,7 @@ jobs:
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/mcp-acceptance.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/normal-caller-precondition.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/derived-container.json
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/math-worker-diagnostic.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/setup-report.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/*.setup.log
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/triangle.html
