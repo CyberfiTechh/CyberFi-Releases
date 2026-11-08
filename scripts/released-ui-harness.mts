@@ -46,7 +46,7 @@ async function pdfLoadObserve(page: any, selector: string): Promise<() => Promis
     return async () => {
         try {
             await page.waitForFunction((key: string) => (window as any).__cyberfiQaPdfLoads?.[key]?.loaded === true, key, { timeout: 20000 });
-            await nodeDelay(750);
+            await nodeDelay(3000);
         } finally {
             await page.evaluate((key: string) => {
                 const observations = (window as any).__cyberfiQaPdfLoads;
@@ -280,7 +280,9 @@ try {
         scale: 0.75,
         fps: 12,
     });
-    await page.addInitScript(() => {
+    // Persistent init scripts also enter Electron PDF OOPIFs and caused a reproduced PDF crash.
+    // Seed this main origin only, then reload; leave future PDF frames untouched.
+    await page.evaluate(() => {
         localStorage.setItem("pdr-kocum-agent.language", "tr");
         localStorage.setItem("happy.welcome.v1", JSON.stringify({ welcomeAcknowledged: true }));
     });
