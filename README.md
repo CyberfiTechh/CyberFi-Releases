@@ -9,9 +9,9 @@ CyberFi’ın Windows ve macOS dağıtım deposu.
 - [Kararlı ajan motoru — 0.4.118](https://github.com/CyberfiTechh/CyberFi-Engine/releases/tag/v0.4.118)
 - [Doğrulananlar ve sınırlar](audit/0.0.125.md)
 
-Windows ve Mac yayınları aynı depoda, ayrı etiketlerle sunulur. Yeni Windows ve macOS yayınları hazırdır. Önceki yayınlar, Windows güncelleme doğrulaması tamamlandıktan sonra kaldırılacaktır.
+Windows ve Mac yayınları aynı depoda, ayrı etiketlerle sunulur. Yalnız güncel 0.0.125 Windows ve macOS yayınları tutulur; eski yayınlar ve sürüm etiketleri kaldırılmıştır.
 
-Uygulama **Ayarlar → Genel → Masaüstü uygulaması** bölümünde sürümleri ve indirme ilerlemesini gösterir. Intel ve Apple Silicon Mac üzerinde otomatik indirme, kurulum ve yeniden açılış doğrulandı. Windows otomatik güncellemesinin son kontrolü sürüyor. Hesabınız yönetici tarafından oluşturulur; “Beni hatırla” oturum anahtarını işletim sisteminin güvenli deposunda şifreleyerek saklar, şifrenizi dosyaya yazmaz.
+Uygulama **Ayarlar → Genel → Masaüstü uygulaması** bölümünde sürümleri ve indirme ilerlemesini gösterir. Intel ve Apple Silicon Mac üzerinde otomatik indirme, kurulum ve yeniden açılış doğrulandı. Windows indirmesi kullanıcı tarafından elle kontrol edildi. Hesabınız yönetici tarafından oluşturulur; “Beni hatırla” oturum anahtarını işletim sisteminin güvenli deposunda şifreleyerek saklar, şifrenizi dosyaya yazmaz.
 
 Bu paketler önizlemedir. Windows kurucusu yerel CyberFi sertifikasıyla imzalanır; Windows güven uyarısı gösterebilir. Intel ve Apple Silicon Mac paketleri ad hoc imzalıdır; Apple Developer ID ve noter onayı yoktur. macOS güvenlik denetimleri kapatılmaz.
 
