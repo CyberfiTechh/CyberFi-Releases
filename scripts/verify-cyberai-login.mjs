@@ -76,7 +76,7 @@ function engineDiagnosticText(value, secrets) {
 }
 function dialogErrorFirstLine(value) { return String(value ?? "").split(/\r?\n/u, 1)[0].trim(); }
 function knownNoDialogRace(value) {
-    return /^(?:dialog\.dismiss: )?Protocol error \(Page\.handleJavaScriptDialog\): No dialog is showing\.?$/u.test(dialogErrorFirstLine(value));
+    return /^(?:dialog\.dismiss: )?Protocol error \(Page\.handleJavaScriptDialog\): (?:No dialog is showing\.?|Not attached to an active page)$/u.test(dialogErrorFirstLine(value));
 }
 
 async function main() {
@@ -698,6 +698,9 @@ if (process.argv.includes("--self-test")) {
     assert(knownNoDialogRace("Protocol error (Page.handleJavaScriptDialog): No dialog is showing\nCall log:"));
     assert(!knownNoDialogRace("dialog.dismiss: Protocol error (Page.handleJavaScriptDialog): Internal error\r\nCall log:"));
     assert(!knownNoDialogRace("Target page, context or browser has been closed"));
+    assert(knownNoDialogRace("dialog.dismiss: Protocol error (Page.handleJavaScriptDialog): Not attached to an active page\r\nCall log:"));
+    assert(!knownNoDialogRace("dialog.dismiss: Protocol error (Page.navigate): Not attached to an active page"));
+    assert(!knownNoDialogRace("dialog.dismiss: Protocol error (Page.handleJavaScriptDialog): Target closed"));
     assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.125-x64.exe", pin.sha256, 10));
     console.log("Strict artifact pins, redirect refusal, independent RSA refusal and credential environment isolation passed. No app or network used.");
 } else await main();
