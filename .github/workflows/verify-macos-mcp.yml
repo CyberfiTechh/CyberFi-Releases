@@ -4,6 +4,10 @@ run-name: Verify macOS MCP ${{ inputs.architecture }} asset ${{ inputs.asset_id 
 on:
     workflow_dispatch:
         inputs:
+            target_version:
+                type: choice
+                options: ["0.0.115", "0.0.116"]
+                default: "0.0.115"
             architecture:
                 type: choice
                 options: [x64, arm64]
@@ -34,6 +38,7 @@ jobs:
         timeout-minutes: 50
         env:
             ARCH: ${{ inputs.architecture }}
+            TARGET_VERSION: ${{ inputs.target_version || '0.0.115' }}
             RELEASE_ID: ${{ inputs.release_id }}
             ASSET_ID: ${{ inputs.asset_id }}
             EXPECTED_SHA: ${{ inputs.sha256 }}
@@ -59,24 +64,25 @@ jobs:
             - name: Install public hidden launcher
               working-directory: upstream
               run: pnpm install --frozen-lockfile --ignore-scripts
-            - name: Download and verify the exact 115 candidate
+            - name: Download and verify the exact published target candidate
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
                   set -euo pipefail
                   [[ "$RELEASE_ID" =~ ^[0-9]+$ && "$ASSET_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
+                  case "$TARGET_VERSION" in 0.0.115|0.0.116) ;; *) exit 1 ;; esac
                   case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
                   test "$(uname -m)" = "$native"
                   gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" > "$RUNNER_TEMP/release.json"
-                  jq -e --argjson id "$ASSET_ID" --arg sha "sha256:$EXPECTED_SHA" --arg name "CyberFi-0.0.115-$ARCH.dmg" \
-                    '.tag_name == "macos-v0.0.115" and any(.assets[]; .id == $id and .digest == $sha and .name == $name)' "$RUNNER_TEMP/release.json"
+                  jq -e --argjson id "$ASSET_ID" --arg sha "sha256:$EXPECTED_SHA" --arg name "CyberFi-$TARGET_VERSION-$ARCH.dmg" --arg tag "macos-v$TARGET_VERSION" \
+                    '.tag_name == $tag and any(.assets[]; .id == $id and .digest == $sha and .name == $name)' "$RUNNER_TEMP/release.json"
                   gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$ASSET_ID" > "$RUNNER_TEMP/candidate.dmg"
                   printf '%s  %s\n' "$EXPECTED_SHA" "$RUNNER_TEMP/candidate.dmg" | shasum -a 256 -c -
                   hdiutil verify "$RUNNER_TEMP/candidate.dmg"
                   mkdir "$RUNNER_TEMP/CyberFi-MCP-DMG"
                   hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/CyberFi-MCP-DMG" "$RUNNER_TEMP/candidate.dmg"
                   app="$RUNNER_TEMP/CyberFi-MCP-DMG/CyberFi.app"
-                  test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.0.115
+                  test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$TARGET_VERSION"
                   lipo "$app/Contents/MacOS/CyberFi" -verify_arch "$native"
                   if [ "$ARCH" = arm64 ]; then codesign --verify --deep --strict "$app"; fi
             - name: Run production dependency preparation and nine real MCP calls

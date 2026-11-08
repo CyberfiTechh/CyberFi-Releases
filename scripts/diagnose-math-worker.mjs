@@ -28,7 +28,7 @@ try {
         JSON.stringify({ left: "2*x+3", right: "11", variable: "x", expected: "4" }));
     probe("stdlib resource setup with the same production limits", ["-c", `
 import json,os,platform,resource,subprocess,sys
-print(json.dumps({'python':sys.version,'machine':platform.machine(),'RLIMIT_AS':resource.getrlimit(resource.RLIMIT_AS),'vszKiB':subprocess.check_output(['/bin/ps','-o','vsz=','-p',str(os.getpid())],text=True).strip()}),flush=True)
+print(json.dumps({'python':sys.version,'machine':platform.machine(),'RLIMIT_AS':resource.getrlimit(resource.RLIMIT_AS),'vszKiB':subprocess.check_output(['/bin/ps','-o','vsz=','-p',str(os.getpid())],text=True).strip(),'rssKiB':subprocess.check_output(['/bin/ps','-o','rss=','-p',str(os.getpid())],text=True).strip()}),flush=True)
 from lgs_math.worker import set_resource_limits
 set_resource_limits('solve_equation')
 print('Production resource setup completed',flush=True)

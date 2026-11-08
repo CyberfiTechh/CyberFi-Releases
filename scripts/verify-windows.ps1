@@ -1,4 +1,4 @@
-param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [ValidateSet("0.0.115", "0.0.116")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
@@ -8,6 +8,11 @@ $expected = @{
     '0.0.115' = '5d6334d1d7f516cd13c893ffd7a18d1a6bb2511292ff6946c8ffb9c37608ea5a'
 }
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
+if ($TargetVersion -eq '0.0.116') {
+    Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '116 requires an explicit immutable published installer digest'
+    $expected[$TargetVersion] = $TargetSha256
+}
+
 function Receive-PublishedAsset([string]$Url, [string]$Destination) {
     Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloading $([IO.Path]::GetFileName($Destination))"
     & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 300 --output $Destination $Url
@@ -21,10 +26,10 @@ function Assert-Owned([string]$Path, [string]$Root) {
     $full
 }
 if ($SelfCheck) {
-    Assert-True ($expected.Count -eq 3) 'Exactly three immutable versions required'
+    Assert-True ($expected.Count -in @(3, 4)) 'Only immutable pinned versions allowed'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
-        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115')) 'Unexpected version'
+        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116')) 'Unexpected version'
     }
     Assert-True ($certificateThumbprint -cmatch '^[A-F0-9]{40}$') 'Invalid certificate pin'
     $null = Assert-Owned (Join-Path ([IO.Path]::GetTempPath()) 'owned/item') ([IO.Path]::GetTempPath())
@@ -35,10 +40,10 @@ if ($SelfCheck) {
 }
 Assert-True ($IsWindows -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted' -and
     $env:GITHUB_REPOSITORY -ceq $repo -and $env:GITHUB_REF -eq 'refs/heads/main') 'Only the disposable public Windows runner may install'
-$fromVersion = $(if ($Upgrade115) { '0.0.114' } else { '0.0.113' })
-$toVersion = $(if ($Upgrade115) { '0.0.115' } else { '0.0.114' })
-$versions = $(if ($Mcp115) { @('0.0.115') } else { @($fromVersion, $toVersion) })
-$rootName = $(if ($Mcp115) { 'cyberfi-windows-mcp-115' } elseif ($Upgrade115) { 'cyberfi-windows-upgrade-115' } else { 'cyberfi-windows-acceptance' })
+$fromVersion = $(if ($Upgrade115) { if ($TargetVersion -eq '0.0.116') { '0.0.115' } else { '0.0.114' } } else { '0.0.113' })
+$toVersion = $(if ($Upgrade115) { $TargetVersion } else { '0.0.114' })
+$versions = $(if ($Mcp115) { @($TargetVersion) } else { @($fromVersion, $toVersion) })
+$rootName = $(if ($Mcp115) { ('cyberfi-windows-mcp-' + $TargetVersion.Replace('0.0.', '')) } elseif ($Upgrade115) { ('cyberfi-windows-upgrade-' + $TargetVersion.Replace('0.0.', '')) } else { 'cyberfi-windows-acceptance' })
 $root = Assert-Owned (Join-Path $env:RUNNER_TEMP $rootName) $env:RUNNER_TEMP
 Assert-True (-not (Test-Path -LiteralPath $root)) 'Acceptance root must start empty'
 $evidence = Join-Path $root 'evidence'
@@ -205,8 +210,8 @@ foreach ($name in @((Get-ChildItem Env: | Where-Object { $_.Name -match 'TOKEN|S
 if ($Mcp115) {
     # Certificate inspection launches PowerShell. Finish it before overriding
     # USERPROFILE so PowerShell cannot seed AppData inside the fresh test HOME.
-    $exe = Join-Path $payloadDirectories['0.0.115'] 'CyberFi.exe'
-    Assert-True ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -eq '0.0.115.0') '115 payload PE version mismatch'
+    $exe = Join-Path $payloadDirectories[$TargetVersion] 'CyberFi.exe'
+    Assert-True ((Get-Item -LiteralPath $exe).VersionInfo.ProductVersion -eq ($TargetVersion + '.0')) 'Target payload PE version mismatch'
     $null = Assert-Signature $exe
 }
 $env:HAPPY_DESKTOP_WINDOWS_HIDDEN = '1'
@@ -243,14 +248,14 @@ const result = await withMcpCallerPrecondition(process.env.CYBERFI_MCP_ACCEPTANC
 assert.equal(result.exitCode, 0, result.output);
 '@ | Set-Content -LiteralPath (Join-Path $UpstreamPath 'acceptance-mcp.mjs') -Encoding utf8
     Push-Location $UpstreamPath
-    try { & node --import tsx acceptance-mcp.mjs; Assert-True ($LASTEXITCODE -eq 0) 'Packaged 115 MCP acceptance failed' }
+    try { & node --import tsx acceptance-mcp.mjs; Assert-True ($LASTEXITCODE -eq 0) 'Packaged target MCP acceptance failed' }
     finally { Pop-Location }
     $mcpResult = Get-Content -LiteralPath $env:CYBERFI_MCP_ACCEPTANCE_REPORT -Raw | ConvertFrom-Json
     Assert-True ($mcpResult.success -and $mcpResult.platform -eq 'win32' -and $mcpResult.arch -eq 'x64' -and
         $mcpResult.bootstrap.servers.Count -eq 9 -and $mcpResult.calls.Count -eq 9 -and
         @($mcpResult.bootstrap.servers | Where-Object { $_.state -ne 'ready' }).Count -eq 0 -and
         @($mcpResult.calls | Where-Object { $_.toolCount -le 0 -or $_.result.isError }).Count -eq 0) 'Nine real MCP calls did not pass'
-    'Signed packaged 115 production MCP bootstrap and nine representative tool calls passed.'
+    'Signed packaged target production MCP bootstrap and nine representative tool calls passed.'
     return
 }
 $env:HAPPY_DESKTOP_SMOKE_REPORT = Join-Path $evidence "fresh-$fromVersion.json"

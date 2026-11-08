@@ -14,9 +14,16 @@ const expected = {
     x64: { old: "8ee5f945082c6da0ddbca28f0721c90788b2cf1a22e65ecd0d14693f23e0b77c", new: "eec14b750cfe87c57d7ae49f9432c0e0f4cc71cdf959da1495675da6c5ba503d" },
     arm64: { old: "6629c214083e33ae7fdb317c87cf594defa46a34bb820a2022534851fd4f3977", new: "b3dc2cb6f5579f91bb0695c3abc968ba670a7f2ab6612614f88b4ce632dd0564" },
 };
+const newVersion = process.env.TARGET_VERSION || "0.0.115";
+assert(["0.0.115", "0.0.116"].includes(newVersion));
+const oldVersion = newVersion === "0.0.116" ? "0.0.115" : "0.0.114";
+if (newVersion === "0.0.116") {
+    assert(/^[a-f0-9]{64}$/u.test(process.env.EXPECTED_NEW_SHA || ""), "116 requires the explicit published native DMG digest");
+    for (const arch of ["x64", "arm64"]) expected[arch] = { old: expected[arch].new, new: process.env.EXPECTED_NEW_SHA };
+}
 const [sourceArgument, rootArgument, oldArgument, newArgument] = process.argv.slice(2);
 assert(sourceArgument && rootArgument && oldArgument && newArgument,
-    "Usage: node --import tsx verify-macos-upgrade-115.mjs <public-upstream> <new-owned-run-root> <113-x64.dmg> <114-x64.dmg>");
+    "Usage: node --import tsx verify-macos-upgrade-115.mjs <public-upstream> <new-owned-run-root> <previous-native.dmg> <target-native.dmg>");
 const source = await realpath(sourceArgument);
 const root = resolve(rootArgument);
 assert(root.startsWith((await realpath(homedir())) + sep), "Run root must be inside the Mac user's home.");
@@ -64,7 +71,7 @@ async function install(dmg, version, expected) {
     if (process.arch === "arm64") run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged]);
     try {
         await lstat(application);
-        await rename(application, join(appDirectory, "CyberFi-0.0.114.rollback.app"));
+        await rename(application, join(appDirectory, `CyberFi-${oldVersion}.rollback.app`));
     } catch (error) {
         if (error.code !== "ENOENT") throw error;
     }
@@ -113,10 +120,10 @@ async function validateCatalog(targetHome) {
         baseFoldersVerified: baseRoles.length, totalBundledFolders: folders.size + baseRoles.length };
 }
 try {
-    console.log("Stage: install and launch released 113");
-    const oldInstall = await install(resolve(oldArgument), "0.0.114",
+    console.log("Stage: install and launch previous published release");
+    const oldInstall = await install(resolve(oldArgument), oldVersion,
         expected[process.arch].old);
-    report.stages.push({ ...oldInstall, ...(await launch("0.0.114")), catalog: await validateCatalog(home) });
+    report.stages.push({ ...oldInstall, ...(await launch(oldVersion)), catalog: await validateCatalog(home) });
     const configPath = join(profile, "desktop/config.json");
     const config = await readFile(configPath, "utf8").then(JSON.parse).catch((error) => {
         if (error.code === "ENOENT") return {};
@@ -133,22 +140,22 @@ try {
     const previousToml = await readFile(userToml, "utf8");
     const retainedToml = previousToml + "\n# Acceptance: keep existing user configuration.\n";
     await writeFile(userToml, retainedToml);
-    console.log("Stage: replace the same app with released 114 and preserve profile");
-    const newInstall = await install(resolve(newArgument), "0.0.115",
+    console.log("Stage: replace the same app with released target and preserve profile");
+    const newInstall = await install(resolve(newArgument), newVersion,
         expected[process.arch].new);
-    report.stages.push({ ...newInstall, ...(await launch("0.0.115")) });
+    report.stages.push({ ...newInstall, ...(await launch(newVersion)) });
     for (const [path, text] of sentinels) assert.equal(await readFile(path, "utf8"), text);
     assert.equal(await readFile(userToml, "utf8"), retainedToml);
     const retainedConfig = JSON.parse(await readFile(configPath, "utf8"));
     assert.equal(retainedConfig.appearance, "dark");
     assert.equal(retainedConfig.defaultPermissionMode, "read_only");
     report.profilePreserved = true;
-    console.log("Stage: launch released 114 with a fresh isolated profile");
+    console.log("Stage: launch released target with a fresh isolated profile");
     const freshHome = join(root, "fresh-home");
     const freshData = join(root, "fresh-user-data");
     await Promise.all([mkdir(freshHome), mkdir(freshData)]);
-    report.stages.push({ ...(await launch("0.0.115", freshHome, freshData, "0.0.115-fresh")),
-        catalog: await validateCatalog(freshHome), mode: "fresh-114-profile" });
+    report.stages.push({ ...(await launch(newVersion, freshHome, freshData, newVersion + "-fresh")),
+        catalog: await validateCatalog(freshHome), mode: "fresh-target-profile" });
     report.success = true;
 } catch (error) {
     report.error = error instanceof Error ? error.message : String(error);

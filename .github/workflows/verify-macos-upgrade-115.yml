@@ -1,9 +1,17 @@
 name: Verify released CyberFi macOS 114 to 115 upgrade
-run-name: Verify macOS ${{ inputs.architecture }} 0.0.114 to 0.0.115
+run-name: Verify macOS ${{ inputs.architecture }} upgrade to ${{ inputs.target_version }}
 
 on:
     workflow_dispatch:
         inputs:
+            target_version:
+                type: choice
+                options: ["0.0.115", "0.0.116"]
+                default: "0.0.115"
+            target_sha256:
+                type: string
+                description: Required published native DMG digest for 116
+                default: ""
             architecture:
                 type: choice
                 options: [x64, arm64]
@@ -19,6 +27,9 @@ jobs:
         timeout-minutes: 30
         env:
             ARCH: ${{ inputs.architecture }}
+            TARGET_VERSION: ${{ inputs.target_version || '0.0.115' }}
+            OLD_VERSION: ${{ inputs.target_version == '0.0.116' && '0.0.115' || '0.0.114' }}
+            EXPECTED_NEW_SHA: ${{ inputs.target_sha256 }}
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
               with:
@@ -43,6 +54,7 @@ jobs:
             - name: Download the published native DMGs
               run: |
                   set -euo pipefail
+                  case "$TARGET_VERSION" in 0.0.115|0.0.116) ;; *) exit 1 ;; esac
                   case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
                   test "$(uname -m)" = "$native"
                   downloads="$RUNNER_TEMP/cyberfi-upgrade-downloads"
@@ -51,7 +63,7 @@ jobs:
                   test ! -e "$root"
                   echo "ACCEPTANCE_ROOT=$root" >> "$GITHUB_ENV"
                   echo "DMG_ROOT=$downloads" >> "$GITHUB_ENV"
-                  for version in 0.0.114 0.0.115; do
+                  for version in "$OLD_VERSION" "$TARGET_VERSION"; do
                     curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
                       "https://github.com/CyberfiTechh/CyberFi-Releases/releases/download/macos-v$version/CyberFi-$version-$ARCH.dmg" \
                       --output "$downloads/CyberFi-$version-$ARCH.dmg"
@@ -62,11 +74,11 @@ jobs:
                   set -euo pipefail
                   unset GH_TOKEN GITHUB_TOKEN NODE_OPTIONS ELECTRON_RUN_AS_NODE
                   node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-macos-upgrade-115.mjs" \
-                    "$PWD" "$ACCEPTANCE_ROOT" "$DMG_ROOT/CyberFi-0.0.114-$ARCH.dmg" "$DMG_ROOT/CyberFi-0.0.115-$ARCH.dmg"
+                    "$PWD" "$ACCEPTANCE_ROOT" "$DMG_ROOT/CyberFi-$OLD_VERSION-$ARCH.dmg" "$DMG_ROOT/CyberFi-$TARGET_VERSION-$ARCH.dmg"
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
-                  name: CyberFi-macOS-${{ inputs.architecture }}-114-to-115
+                  name: CyberFi-macOS-${{ inputs.architecture }}-upgrade-${{ inputs.target_version }}
                   path: |
                       ${{ env.ACCEPTANCE_ROOT }}/install-upgrade-report.json
                       ${{ env.ACCEPTANCE_ROOT }}/smoke-*.json
