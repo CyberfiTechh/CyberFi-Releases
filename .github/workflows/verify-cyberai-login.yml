@@ -1,0 +1,68 @@
+name: Verify native CyberAI login and remembered account
+run-name: CyberAI 125 native login ${{ inputs.target }}
+on:
+    workflow_dispatch:
+        inputs:
+            target:
+                type: choice
+                options: [windows, macos-x64, macos-arm64]
+                required: true
+            artifacts_json:
+                type: string
+                description: Reviewed draft125 releaseId, assetId, sha256, manifestAssetId, manifestSha256
+                required: true
+            source_sha:
+                type: string
+                description: Reviewed private source125 full commit SHA
+                required: true
+permissions:
+    contents: read
+jobs:
+    native:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        permissions:
+            contents: write # Required only to download exact unpublished acceptance artifacts.
+        runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-15' || 'macos-15-intel' }}
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: acceptance
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  version: 10.28.1
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Install existing hidden launcher and recording dependencies
+              working-directory: upstream
+              shell: bash
+              run: |
+                  pnpm install --frozen-lockfile --ignore-scripts
+                  pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
+            - name: Verify real native login, protected remember and forced logout
+              working-directory: upstream
+              shell: bash
+              env:
+                  TARGET: ${{ inputs.target }}
+                  ACCEPTANCE_ARTIFACTS: ${{ inputs.artifacts_json }}
+                  ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+                  GH_TOKEN: ${{ github.token }}
+                  CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI125_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+                  CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI125_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+              run: node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-cyberai-login.mjs" "$GITHUB_WORKSPACE/upstream"
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberAI-login-${{ inputs.target }}
+                  path: ${{ runner.temp }}/cyberfi-native-login/evidence
+                  retention-days: 7
+                  include-hidden-files: false
