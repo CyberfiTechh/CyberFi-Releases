@@ -9,7 +9,7 @@ on:
                 required: false
             desktop_version:
                 type: choice
-                options: ["0.0.120", "0.0.119", "0.0.118", "0.0.117", "0.0.116"]
+                options: ["0.0.121", "0.0.120", "0.0.119", "0.0.118", "0.0.117", "0.0.116"]
                 required: true
             architecture:
                 type: choice
