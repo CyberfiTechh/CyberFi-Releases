@@ -531,11 +531,20 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         await page.screenshot({ path: join(evidence, "reopened.png"), mask: [page.getByText(username, { exact: true })] });
         report.checks.actualTerminateRelaunch = true; report.checks.nativeRememberWithoutPasswordEntry = true;
         // Exercise the existing local renderer transport before revocation.
-        const transport = await page.evaluate(async () => {
-            const value = await window.happyDesktop.runtimeGet();
-            if (!value.activeTarget?.happyAgentHttpUrl) return false;
-            const response = await fetch(value.activeTarget.happyAgentHttpUrl + "/health"); return response.ok;
-        }); assert(transport, "Authenticated workspace transport did not open");
+        stage = "authenticated workspace transport readiness";
+        let transport = false; const transportDeadline = Date.now() + 30000;
+        report.workspaceTransportProbe = [];
+        while (!transport && Date.now() < transportDeadline) {
+            const proof = await page.evaluate(async () => {
+                const value = await window.happyDesktop.runtimeGet();
+                if (!value.activeTarget?.happyAgentHttpUrl) return { ready: false, status: null };
+                try { const response = await fetch(value.activeTarget.happyAgentHttpUrl + "/health", { signal: AbortSignal.timeout(3000) }); return { ready: response.ok, status: response.status }; }
+                catch { return { ready: false, status: null }; }
+            });
+            if (JSON.stringify(proof) !== JSON.stringify(report.workspaceTransportProbe.at(-1))) report.workspaceTransportProbe.push(proof);
+            transport = proof.ready; if (!transport) await delay(250);
+        }
+        assert(transport, "Authenticated workspace transport did not open");
         report.checks.authenticatedWorkspaceTransport = true;
         const sockets = new Set(); page.on("websocket", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
         stage = "logout settings navigation";
@@ -560,10 +569,14 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         await page.evaluate(marker => { window.__cyberaiLogoutMarker = marker; window.addEventListener("beforeunload", event => { event.preventDefault(); event.returnValue = "stay"; console.info("cyberai-acceptance-beforeunload-stay"); }); }, marker);
         stage = "forced main-process logout";
         const observedSockets = sockets.size; await signOut.click();
-        await waitLogin(); assert.equal(await page.evaluate(() => window.__cyberaiLogoutMarker), undefined, "Logout must replace the document despite beforeunload prevention");
+        report.beforeUnloadProof = { signals: beforeUnloadSignals, requestedStayDialogs: stayDialogs, dismissedDialogRaces: dismissRaces, acceptedDialogs: 0, oldContextDestroyed: false };
+        await waitLogin();
+        stage = "authoritative logout document replacement";
+        await page.waitForFunction(() => window.__cyberaiLogoutMarker === undefined && !!document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"]'), undefined, { timeout: 30000 });
+        stage = "forced logout beforeunload proof";
         await Promise.all(dialogSettlements);
+        report.beforeUnloadProof = { signals: beforeUnloadSignals, requestedStayDialogs: stayDialogs, dismissedDialogRaces: dismissRaces, acceptedDialogs: 0, oldContextDestroyed: true, unknownDialogError };
         assert(beforeUnloadSignals > 0 && unexpectedDialogs === 0 && !unknownDialogError, "The renderer must actually attempt to prevent logout navigation without unrelated dialog errors");
-        report.beforeUnloadProof = { signals: beforeUnloadSignals, requestedStayDialogs: stayDialogs, dismissedDialogRaces: dismissRaces, acceptedDialogs: 0 };
         await denied(); await assert.rejects(lstat(saved), { code: "ENOENT" });
         assert.equal(sockets.size, 0); report.logoutTransportProof = observedSockets ? "Observed workspace WebSockets closed and old document destroyed" : "Old workspace document destroyed; no WebSocket was observed";
         await page.screenshot({ path: join(evidence, "logout.png"), mask: [login().locator('input[name="username"], input[name="password"]')] });
