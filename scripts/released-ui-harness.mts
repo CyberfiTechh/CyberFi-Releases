@@ -583,7 +583,10 @@ try {
         assert.equal(pdfEvidence.bytes, outputFixtures.find((item: any) => item.name === "qa-support.pdf").size);
         await captureOutput("pdf");
         await open("qa-support.docx");
-        await page.getByRole("button", { name: "İndir", exact: true }).first().waitFor();
+        const officeCard = page.locator(".happy-agent-artifact-viewer__file-card").filter({ hasText: "qa-support.docx" });
+        await officeCard.waitFor();
+        assert.ok((await officeCard.innerText()).includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+        await officeCard.getByRole("button", { name: "İndir", exact: true }).waitFor();
         await captureOutput("docx");
         report.outputPreviewEvidence = { png400x220: true, pdf: { ...pdfEvidence, readablePageVisuallyVerified: false, screenshot: "cyberfi-115-integrated-output-pdf.png" }, officeDownloadOffered: true, officeEditingTested: false, officeScreenshot: "cyberfi-115-integrated-output-docx.png" };
         return report.outputPreviewEvidence;
