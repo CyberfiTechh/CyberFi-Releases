@@ -1,0 +1,162 @@
+{
+  "success": true,
+  "root": "/Users/runner/work/_temp/cyberfi-updater-tests-jJtFpt",
+  "architecture": "x64",
+  "mode": "declared ad-hoc native transaction fixtures; not released product GUI acceptance",
+  "helperSha256": "fb3733b299eda07ca203c0e63be9b12a2c549b50cdb1b0bf2d8b82adc8dd4a32",
+  "cases": [
+    {
+      "name": "success",
+      "success": true,
+      "targetBefore": {
+        "device": 16777220,
+        "inode": 12888452005,
+        "uid": 501
+      },
+      "candidateBefore": {
+        "device": 16777220,
+        "inode": 12888452014,
+        "uid": 501
+      },
+      "originalSha256": "8e3b3493decc5943234fd7929a8771d39e8f06baaf3b91c4ef4da8bf31d938e9",
+      "candidateSha256": "0051d3386a4c92831efc1d5d448e67a25422322c009e614f59a01caea6ec2db8",
+      "helperSha256": "fb3733b299eda07ca203c0e63be9b12a2c549b50cdb1b0bf2d8b82adc8dd4a32",
+      "parentPid": 3201,
+      "helperPid": 3204,
+      "readyObservedBeforeParentExit": true,
+      "result": {
+        "oldBundleRemoved": true,
+        "pid": 3233,
+        "status": "acknowledged",
+        "version": "0.0.124",
+        "nonceSha256": "9fa3e25eafab2dbf7bd016a8b6eebf11a365c1fb2291a9d2d1efe0cc3b6fc957"
+      },
+      "receipt": {
+        "version": "0.0.124",
+        "pid": 3233,
+        "nonceSha256": "9fa3e25eafab2dbf7bd016a8b6eebf11a365c1fb2291a9d2d1efe0cc3b6fc957"
+      },
+      "profilePreserved": true
+    },
+    {
+      "name": "rollback",
+      "success": true,
+      "targetBefore": {
+        "device": 16777220,
+        "inode": 12888452063,
+        "uid": 501
+      },
+      "candidateBefore": {
+        "device": 16777220,
+        "inode": 12888452071,
+        "uid": 501
+      },
+      "originalSha256": "8e3b3493decc5943234fd7929a8771d39e8f06baaf3b91c4ef4da8bf31d938e9",
+      "candidateSha256": "0051d3386a4c92831efc1d5d448e67a25422322c009e614f59a01caea6ec2db8",
+      "helperSha256": "fb3733b299eda07ca203c0e63be9b12a2c549b50cdb1b0bf2d8b82adc8dd4a32",
+      "parentPid": 3260,
+      "helperPid": 3268,
+      "readyObservedBeforeParentExit": true,
+      "result": {
+        "fallbackOpened": true,
+        "fallbackPid": 3314,
+        "previousVersion": "0.0.123",
+        "reason": "New CyberFi exited before acknowledgment",
+        "status": "rolled-back",
+        "targetApp": "/Users/runner/work/_temp/cyberfi-updater-tests-jJtFpt/rollback/Applications/CyberFi.app",
+        "nonceSha256": "1c9b582b80d7fe57721894916e72ce4700a85953de77f799f37011afe60943b7"
+      },
+      "restoredOriginal": {
+        "pid": 3314,
+        "version": "0.0.123",
+        "sha256": "8e3b3493decc5943234fd7929a8771d39e8f06baaf3b91c4ef4da8bf31d938e9"
+      },
+      "profilePreserved": true
+    },
+    {
+      "name": "wrong-arch",
+      "success": true,
+      "targetBefore": {
+        "device": 16777220,
+        "inode": 12888452125,
+        "uid": 501
+      },
+      "candidateBefore": {
+        "device": 16777220,
+        "inode": 12888452133,
+        "uid": 501
+      },
+      "originalSha256": "8e3b3493decc5943234fd7929a8771d39e8f06baaf3b91c4ef4da8bf31d938e9",
+      "candidateSha256": "6d0444baec1130c4e35626f81da55c1b67c739c0e29bcc1d3957bc6fb365dd3b",
+      "helperSha256": "fb3733b299eda07ca203c0e63be9b12a2c549b50cdb1b0bf2d8b82adc8dd4a32",
+      "parentPid": 3335,
+      "helperPid": 3356,
+      "refusal": {
+        "exitCode": 1,
+        "reason": "CyberFi updater: Wrong app architecture",
+        "parentRemainedAlive": true
+      },
+      "profilePreserved": true
+    },
+    {
+      "name": "read-only",
+      "success": true,
+      "targetBefore": {
+        "device": 16777220,
+        "inode": 12888452170,
+        "uid": 501
+      },
+      "candidateBefore": {
+        "device": 16777220,
+        "inode": 12888452180,
+        "uid": 501
+      },
+      "originalSha256": "8e3b3493decc5943234fd7929a8771d39e8f06baaf3b91c4ef4da8bf31d938e9",
+      "candidateSha256": "0051d3386a4c92831efc1d5d448e67a25422322c009e614f59a01caea6ec2db8",
+      "helperSha256": "fb3733b299eda07ca203c0e63be9b12a2c549b50cdb1b0bf2d8b82adc8dd4a32",
+      "parentPid": 3418,
+      "helperPid": 3438,
+      "refusal": {
+        "exitCode": 1,
+        "reason": "CyberFi updater: Target parent is not writable",
+        "parentRemainedAlive": true
+      },
+      "profilePreserved": true
+    },
+    {
+      "name": "permission-race",
+      "success": true,
+      "targetBefore": {
+        "device": 16777220,
+        "inode": 12888452207,
+        "uid": 501
+      },
+      "candidateBefore": {
+        "device": 16777220,
+        "inode": 12888452219,
+        "uid": 501
+      },
+      "originalSha256": "8e3b3493decc5943234fd7929a8771d39e8f06baaf3b91c4ef4da8bf31d938e9",
+      "candidateSha256": "0051d3386a4c92831efc1d5d448e67a25422322c009e614f59a01caea6ec2db8",
+      "helperSha256": "fb3733b299eda07ca203c0e63be9b12a2c549b50cdb1b0bf2d8b82adc8dd4a32",
+      "parentPid": 3460,
+      "helperPid": 3464,
+      "readyObservedBeforeParentExit": true,
+      "result": {
+        "fallbackOpened": true,
+        "fallbackPid": 3479,
+        "previousVersion": "0.0.123",
+        "reason": "Atomic app exchange failed",
+        "status": "install-not-applied",
+        "targetApp": "/Users/runner/work/_temp/cyberfi-updater-tests-jJtFpt/permission-race/Applications/CyberFi.app",
+        "nonceSha256": "da8f7ddf815092ee60ff4e01c98805fb20cc66879e18fa83d429bac6ddd1af1e"
+      },
+      "restoredOriginal": {
+        "pid": 3479,
+        "version": "0.0.123",
+        "sha256": "8e3b3493decc5943234fd7929a8771d39e8f06baaf3b91c4ef4da8bf31d938e9"
+      },
+      "profilePreserved": true
+    }
+  ]
+}

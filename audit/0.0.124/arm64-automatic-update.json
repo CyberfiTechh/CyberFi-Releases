@@ -1,0 +1,379 @@
+{
+  "success": false,
+  "architecture": "arm64",
+  "sourceVersion": "0.0.123",
+  "targetVersion": "0.0.124",
+  "actualGui": true,
+  "progress": [
+    {
+      "status": "available",
+      "domPercent": null,
+      "domText": null
+    },
+    {
+      "status": "downloading",
+      "fraction": 0,
+      "message": "İndirme hazırlanıyor…",
+      "domPercent": 0,
+      "domText": "%0"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.00010840052458867149,
+      "message": "Paket indiriliyor…",
+      "domPercent": 0,
+      "domText": "%0"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.020028227538946845,
+      "message": "Paket indiriliyor…",
+      "domPercent": 2,
+      "domText": "%2"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.030326277374870637,
+      "message": "Paket indiriliyor…",
+      "domPercent": 3,
+      "domText": "%3"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.05005517285000884,
+      "message": "Paket indiriliyor…",
+      "domPercent": 5,
+      "domText": "%5"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.08064494210059626,
+      "message": "Paket indiriliyor…",
+      "domPercent": 8,
+      "domText": "%8"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.09007578773981069,
+      "message": "Paket indiriliyor…",
+      "domPercent": 9,
+      "domText": "%9"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.13050918341138515,
+      "message": "Paket indiriliyor…",
+      "domPercent": 13,
+      "domText": "%13"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.1800267335912874,
+      "message": "Paket indiriliyor…",
+      "domPercent": 18,
+      "domText": "%18"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.21005973938089698,
+      "message": "Paket indiriliyor…",
+      "domPercent": 21,
+      "domText": "%21"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.24008668469195898,
+      "message": "Paket indiriliyor…",
+      "domPercent": 24,
+      "domText": "%24"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.2506015355770601,
+      "message": "Paket indiriliyor…",
+      "domPercent": 25,
+      "domText": "%25"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.29006328965686706,
+      "message": "Paket indiriliyor…",
+      "domPercent": 29,
+      "domText": "%29"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.33017148375467553,
+      "message": "Paket indiriliyor…",
+      "domPercent": 33,
+      "domText": "%33"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.37027228089285935,
+      "message": "Paket indiriliyor…",
+      "domPercent": 37,
+      "domText": "%37"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.3902179774171749,
+      "message": "Paket indiriliyor…",
+      "domPercent": 39,
+      "domText": "%39"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.4200432331779707,
+      "message": "Paket indiriliyor…",
+      "domPercent": 42,
+      "domText": "%42"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.4503953800627987,
+      "message": "Paket indiriliyor…",
+      "domPercent": 45,
+      "domText": "%45"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.4900749474769553,
+      "message": "Paket indiriliyor…",
+      "domPercent": 49,
+      "domText": "%49"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.5100206440012709,
+      "message": "Paket indiriliyor…",
+      "domPercent": 51,
+      "domText": "%51"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.5202102933126059,
+      "message": "Paket indiriliyor…",
+      "domPercent": 52,
+      "domText": "%52"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.5602023591140534,
+      "message": "Paket indiriliyor…",
+      "domPercent": 56,
+      "domText": "%56"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.5900125033759379,
+      "message": "Paket indiriliyor…",
+      "domPercent": 59,
+      "domText": "%59"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.620039448687,
+      "message": "Paket indiriliyor…",
+      "domPercent": 62,
+      "domText": "%62"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.6500644752876048,
+      "message": "Paket indiriliyor…",
+      "domPercent": 65,
+      "domText": "%65"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.6800914205986668,
+      "message": "Paket indiriliyor…",
+      "domPercent": 68,
+      "domText": "%68"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.7204133259601921,
+      "message": "Paket indiriliyor…",
+      "domPercent": 72,
+      "domText": "%72"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.7702794727489524,
+      "message": "Paket indiriliyor…",
+      "domPercent": 77,
+      "domText": "%77"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.8300081617973103,
+      "message": "Paket indiriliyor…",
+      "domPercent": 83,
+      "domText": "%83"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.8806246236184788,
+      "message": "Paket indiriliyor…",
+      "domPercent": 88,
+      "domText": "%88"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.9100162574321912,
+      "message": "Paket indiriliyor…",
+      "domPercent": 91,
+      "domText": "%91"
+    },
+    {
+      "status": "downloading",
+      "fraction": 0.960205700316746,
+      "message": "Paket indiriliyor…",
+      "domPercent": 96,
+      "domText": "%96"
+    },
+    {
+      "status": "downloading",
+      "fraction": 1,
+      "message": "Paket doğrulanıyor…",
+      "domPercent": 100,
+      "domText": "%100"
+    },
+    {
+      "status": "downloading",
+      "fraction": 1,
+      "message": "Mac paketi doğrulanıyor ve kurulum hazırlanıyor…",
+      "domPercent": 100,
+      "domText": "%100"
+    },
+    {
+      "status": "downloading",
+      "fraction": 1,
+      "message": "Kurulum başlatılıyor. CyberFi yeniden açılacak…",
+      "domPercent": 100,
+      "domText": "%100"
+    }
+  ],
+  "events": [
+    {
+      "type": "helper-ready",
+      "at": 1794147087556,
+      "helperPid": 3267
+    },
+    {
+      "type": "old-parent-exited",
+      "at": 1794147088060
+    },
+    {
+      "type": "new-target-acknowledged",
+      "at": 1794147101643,
+      "pid": 3404
+    }
+  ],
+  "errors": [],
+  "limits": [
+    "CI launches do not prove Gatekeeper acceptance of a browser-quarantined download."
+  ],
+  "immutableInputs": {
+    "pins": {
+      "source": {
+        "releaseId": 438272881,
+        "assetId": 724065924,
+        "sha256": "43d09fc4744f0d6dc982cc6a78b7649ec3cfc11a80e5477b93f9590820f9fd29",
+        "manifestAssetId": 724073213,
+        "manifestSha256": "e3730bcf33c28d737591db137efffe3f4a39cc75788963533f605c50e34b835f"
+      },
+      "target": {
+        "releaseId": 438276169,
+        "assetId": 724081124,
+        "sha256": "77782613c5cff5e46ca8fe72f22fbf68ebaf3dbd5ae6865cfd512899f67d68fa",
+        "manifestAssetId": 724088620,
+        "manifestSha256": "e8144f2910a7b576f18a6c4c55165d1a0cbffe3ad4c14b6b62526e29ec378112"
+      }
+    },
+    "sourceFixture": "Exact signed draft123 bootstrap test fixture; not a historical public release",
+    "target": "Public124 preview",
+    "independentRsaManifests": true,
+    "packagedBundleProofs": {
+      "source": {
+        "fuseWires": [
+          "0109303130303131303131"
+        ],
+        "asarSha256": "89657dded4d62e0bb5420b6c603a87a5bceafe30d1b32f4c84162422f25ba72a",
+        "executableSha256": "0472f0e83f3f22979fbc76eae43d28a130dde3c34c1aed7f6373f3c06b3b357f"
+      },
+      "target": {
+        "fuseWires": [
+          "0109303130303131303131"
+        ],
+        "asarSha256": "1ee9f3a80b54643c9042fba3ab8f674f00c2f49323ae31a96c32e701bc4a38a7",
+        "executableSha256": "0b30a22dd667e527d1124c016b90a36f093474bf3d16628f6c5a2af353e70d4b"
+      }
+    },
+    "fusesModified": false,
+    "quarantineModified": false
+  },
+  "oldPid": 2627,
+  "sourceVideo": {
+    "path": "/Users/runner/work/_temp/cyberfi-macos-app-update/evidence/actual-source-update.webm",
+    "width": 1100,
+    "height": 760,
+    "durationMs": 34601,
+    "framesReceived": 1391,
+    "framesWritten": 174
+  },
+  "receipt": {
+    "version": "0.0.124",
+    "pid": 3404,
+    "executablePath": "/Users/runner/work/_temp/cyberfi-macos-app-update/Applications/CyberFi.app/Contents/MacOS/CyberFi",
+    "nonceSha256": "d7c97b3b0e878172ce1993f9c9d1389488f6fb417dcff1b4f33574b866dd4418",
+    "status": "acknowledged",
+    "oldBundleRemoved": true
+  },
+  "reopenedRuntime": {
+    "phase": "ready"
+  },
+  "ownedEngineStillHealthy": true,
+  "profilePreserved": true,
+  "actualDomProgress": true,
+  "targetManuallyLaunched": false,
+  "targetVideo": {
+    "path": "/Users/runner/work/_temp/cyberfi-macos-app-update/evidence/actual-reopened-target.webm",
+    "width": 1100,
+    "height": 760,
+    "durationMs": 1188,
+    "framesReceived": 5,
+    "framesWritten": 6
+  },
+  "visibility": {
+    "activeSamples": 0,
+    "bundle": "/Users/runner/work/_temp/cyberfi-macos-app-update/Applications/CyberFi.app",
+    "durationMs": 59368,
+    "onscreenSamples": 0,
+    "pids": [
+      2627,
+      3404
+    ],
+    "policiesByPid": {
+      "2627": [
+        0,
+        1
+      ],
+      "3404": [
+        0,
+        1
+      ]
+    },
+    "policySamplesByPid": {
+      "2627": 864,
+      "3404": 199
+    },
+    "regularPolicySamples": 50,
+    "samples": 1275,
+    "systemWindowsMax": 19,
+    "violations": [],
+    "windowsOwned": 2
+  }
+}
