@@ -19,6 +19,8 @@ using System.Text;
 
 public static class CyberFiOwnedLaunch {
     public static string Stage = "initialize";
+    public static string CreationApi = "none", TokenMode = "unknown";
+    public static bool SelectedTokenVerified = false;
     const uint Query = 8, Suspended = 4, UnicodeEnvironment = 0x400, NoWindow = 0x08000000;
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct StartupInfo {
@@ -45,6 +47,8 @@ public static class CyberFiOwnedLaunch {
     static extern bool CreateRestrictedToken(IntPtr token, uint flags, uint disableCount, [In] SidAttributes[] disable, uint deleteCount, IntPtr delete, uint restrictCount, IntPtr restrict, out IntPtr restricted);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool CreateProcessWithTokenW(IntPtr token, uint logon, string app, StringBuilder command, uint flags, IntPtr env, string cwd, ref StartupInfo startup, out ProcessInfo process);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateProcessAsUserW(IntPtr token, string app, StringBuilder command, IntPtr processSecurity, IntPtr threadSecurity, bool inherit, uint flags, IntPtr env, string cwd, ref StartupInfo startup, out ProcessInfo process);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool CreateProcessW(string app, StringBuilder command, IntPtr processSecurity, IntPtr threadSecurity, bool inherit, uint flags, IntPtr env, string cwd, ref StartupInfo startup, out ProcessInfo process);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -158,7 +162,7 @@ public static class CyberFiOwnedLaunch {
                 if (linked == IntPtr.Zero) throw new InvalidOperationException("linked-token-unavailable");
                 launchToken = linked;
             }
-            VerifyMedium(launchToken, sid);
+            VerifyMedium(launchToken, sid); SelectedTokenVerified = true; TokenMode = tokenMode;
             var command = new StringBuilder(Quote(executable));
             foreach (string argument in arguments) command.Append(' ').Append(Quote(argument));
             environment = EnvironmentBlock();
@@ -166,9 +170,17 @@ public static class CyberFiOwnedLaunch {
             startup.flags = 1; startup.show = 0;
             Stage = "create-suspended-owned-child";
             uint flags = Suspended | UnicodeEnvironment | NoWindow;
-            Check(elevated
-                ? CreateProcessWithTokenW(launchToken, 0, executable, command, flags, environment, Path.GetDirectoryName(executable), ref startup, out child)
-                : CreateProcessW(executable, command, IntPtr.Zero, IntPtr.Zero, false, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
+            if (tokenMode == "restricted-medium") {
+                // Windows documents CreateProcessAsUser for a restricted version of the caller's own token.
+                CreationApi = "CreateProcessAsUserW";
+                Check(CreateProcessAsUserW(launchToken, executable, command, IntPtr.Zero, IntPtr.Zero, false, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
+            } else if (elevated) {
+                CreationApi = "CreateProcessWithTokenW";
+                Check(CreateProcessWithTokenW(launchToken, 0, executable, command, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
+            } else {
+                CreationApi = "CreateProcessW";
+                Check(CreateProcessW(executable, command, IntPtr.Zero, IntPtr.Zero, false, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
+            }
             Stage = "verify-suspended-child-token";
             Check(OpenProcessToken(child.process, Query | 2, out childToken)); VerifyMedium(childToken, sid);
             var image = new StringBuilder(32768); int length = image.Capacity;
@@ -222,10 +234,19 @@ if(-not $match){exit 19}
 exit 23
 '@
         $probeExecutable = (Get-Process -Id $PID).Path
-        $result = [CyberFiOwnedLaunch]::Run($probeExecutable, @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probeCode))))
-        $probe = Get-Content -LiteralPath $probeReport -Raw | ConvertFrom-Json
-        if (-not $probe.environmentPreserved -or $result.exitCode -ne 23 -or -not $result.sameSid -or $result.elevated) { throw 'Owned launcher self-test failed.' }
-        [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
+        try {
+            $result = [CyberFiOwnedLaunch]::Run($probeExecutable, @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probeCode))))
+            $probe = Get-Content -LiteralPath $probeReport -Raw | ConvertFrom-Json
+            if (-not $probe.environmentPreserved -or $result.exitCode -ne 23 -or -not $result.sameSid -or $result.elevated) { throw 'Owned launcher self-test failed.' }
+            [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; creationApi=[CyberFiOwnedLaunch]::CreationApi; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
+        } finally {
+            Assert-NoReparsePoint $probeRoot
+            if (Test-Path -LiteralPath $probeReport) {
+                Assert-NoReparsePoint $probeReport
+                [IO.File]::Delete($probeReport)
+            }
+            [IO.Directory]::Delete($probeRoot, $false)
+        }
         exit 0
     }
 
@@ -249,6 +270,6 @@ exit 23
         if ($cause -is [ComponentModel.Win32Exception]) { $nativeError = $cause.NativeErrorCode; break }
         $cause = $cause.InnerException
     }
-    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError } | ConvertTo-Json -Compress))
+    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified } | ConvertTo-Json -Compress))
     exit 1
 }
