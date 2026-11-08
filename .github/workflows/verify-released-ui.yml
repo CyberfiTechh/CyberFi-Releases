@@ -1,0 +1,79 @@
+name: Verify released macOS UI and native clipboard
+run-name: Released macOS UI ${{ inputs.architecture }} asset ${{ inputs.desktop_asset_id }}
+on:
+    workflow_dispatch:
+        inputs:
+            architecture:
+                type: choice
+                options: [x64, arm64]
+                required: true
+            desktop_release_id:
+                type: string
+                required: true
+            desktop_asset_id:
+                type: string
+                required: true
+            desktop_sha256:
+                type: string
+                required: true
+            engine_release_id:
+                type: string
+                required: true
+            engine_asset_id:
+                type: string
+                required: true
+            engine_sha256:
+                type: string
+                required: true
+            engine_tag:
+                type: choice
+                options: [v0.4.117, v0.4.116]
+                required: true
+permissions:
+    contents: read
+jobs:
+    native:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        permissions:
+            contents: write # Only needed for exact draft release asset retrieval.
+        runs-on: ${{ inputs.architecture == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+        timeout-minutes: 40
+        env:
+            ARCH: ${{ inputs.architecture }}
+            DESKTOP_RELEASE_ID: ${{ inputs.desktop_release_id }}
+            DESKTOP_ASSET_ID: ${{ inputs.desktop_asset_id }}
+            DESKTOP_SHA256: ${{ inputs.desktop_sha256 }}
+            ENGINE_RELEASE_ID: ${{ inputs.engine_release_id }}
+            ENGINE_ASSET_ID: ${{ inputs.engine_asset_id }}
+            ENGINE_SHA256: ${{ inputs.engine_sha256 }}
+            ENGINE_TAG: ${{ inputs.engine_tag }}
+            GH_TOKEN: ${{ github.token }}
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: verifier
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: public-upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  version: 10.28.1
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Install only public upstream verification dependencies
+              working-directory: public-upstream
+              run: pnpm install --frozen-lockfile --ignore-scripts
+            - name: Verify exact released artifacts and run isolated native checks
+              run: node verifier/scripts/verify-released-ui.mjs "$GITHUB_WORKSPACE/public-upstream" "$RUNNER_TEMP/cyberfi-released-ui"
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberFi-released-ui-${{ inputs.architecture }}-${{ inputs.desktop_asset_id }}
+                  path: ${{ runner.temp }}/cyberfi-released-ui/evidence
+                  retention-days: 7
