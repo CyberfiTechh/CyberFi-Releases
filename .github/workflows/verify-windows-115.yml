@@ -10,11 +10,11 @@ on:
                 description: Actual signed116 GUI button/download/app-own installer handoff to117
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116", "0.0.117"]
+                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118"]
                 default: "0.0.115"
             target_sha256:
                 type: string
-                description: Required published installer digest for 116/117
+                description: Required published installer digest for 117/118
                 default: ""
 
 permissions:
