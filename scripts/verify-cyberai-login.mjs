@@ -155,7 +155,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         }
         return found;
     }
-    let executable, mounted, runtime, inference, inferenceToken, paths, browser, page, video, run, runResult, runError, ownedPid, watcher, visibilityDone, watcherStop, keychainCleanup;
+    let executable, mounted, runtime, inference, inferenceToken, fixtureEnvironment, paths, browser, page, video, run, runResult, runError, ownedPid, watcher, visibilityDone, watcherStop, keychainCleanup;
     let stage = "artifact verification";
     const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
     async function processProof(pid) {
@@ -287,13 +287,27 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const systemNames = new Set(["path", "systemroot", "windir", "comspec", "pathext", "psmodulepath", "systemdrive", "programfiles", "programfiles(x86)", "programw6432", "commonprogramfiles", "commonprogramfiles(x86)", "commonprogramw6432", "programdata", "allusersprofile", "public", "userdomain", "userdnsdomain", "username", "computername", "os", "processor_architecture", "processor_identifier", "number_of_processors", "sessionname", "temp", "tmp"]);
         const systemEnv = Object.fromEntries(Object.entries(safeEnv).filter(([key]) => systemNames.has(key.toLowerCase())));
         const engineEnv = { ...systemEnv, ...gymHostEnvironment(paths), HAPPY_HOME_DIR: paths.happyHome, HAPPY_AGENT_PROJECTS_DIRECTORY: paths.projects, HAPPY_AGENT_WORKSPACES_DIRECTORY: paths.workspaces, HAPPY_AGENT_SERVER_SOCKET_PATH: paths.socketPath, HAPPY_AGENT_SERVER_TOKEN_PATH: paths.tokenPath, HAPPY_GYM_INFERENCE_URL: `http://127.0.0.1:${inference.address().port}/inference`, HAPPY_GYM_TOKEN: inferenceToken };
+        fixtureEnvironment = engineEnv;
         if (!windows) {
             stage = "native Keychain environment preflight";
             // HOME alone need not select Foundation's user domain. Observe the
             // real NSHomeDirectory first, then align the isolated OS domain used
             // by both security(1) and Electron across both native lifetimes.
             const homeSource = join(root, "foundation-home.swift"), homeProbe = join(root, "foundation-home");
-            await writeFile(homeSource, "import Foundation\nprint(NSHomeDirectory())\n");
+            await writeFile(homeSource, `import Foundation
+import Security
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" {
+    var keychain: SecKeychain?
+    let opened = CommandLine.arguments[2].withCString { SecKeychainOpen($0, &keychain) }
+    var flags: SecKeychainStatus = 0
+    let status = keychain.map { SecKeychainGetStatus($0, &flags) } ?? errSecParam
+    let result: [String: Any] = ["openStatus": Int(opened), "status": Int(status),
+        "unlocked": flags & UInt32(kSecUnlockStateStatus) != 0,
+        "readable": flags & UInt32(kSecReadPermStatus) != 0,
+        "writable": flags & UInt32(kSecWritePermStatus) != 0]
+    print(String(data: try JSONSerialization.data(withJSONObject: result), encoding: .utf8)!)
+} else { print(NSHomeDirectory()) }
+`);
             await command("/usr/bin/swiftc", ["-O", homeSource, "-o", homeProbe], { timeout: 180000 });
             const runnerFoundationHome = await command(homeProbe, [], { env: safeEnv });
             const withoutOverride = await command(homeProbe, [], { env: engineEnv });
@@ -323,14 +337,19 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             if (keychainReadError && !missingOwnedDefault) throw keychainReadError;
             assert((originalDefault.length === 1 || missingOwnedDefault) && actualDefault.length === 1 && originalList.length <= 20 && actualList.length <= 20, "Native user keychain baseline missing");
             assert.notEqual(await realpath(engineEnv.HOME), await realpath(safeEnv.HOME), "Keychain calibration must use an isolated owned home");
-            const keychain = join(root, "owned-login.keychain-db"), keychainPassword = randomBytes(32).toString("hex");
+            await mkdir(join(paths.home, "Library/Preferences"), { recursive: true });
+            await mkdir(join(paths.home, "Library/Keychains"), { recursive: true });
+            const keychain = join(paths.home, "Library/Keychains/cyberai-login.keychain-db"), keychainPassword = randomBytes(32).toString("hex");
             report.keychainPreflight.defaultMetadataReadable = originalDefault.length === 1 ? await security(["show-keychain-info", originalDefault[0]], engineEnv).then(() => true, () => false) : false;
             keychainCleanup = async () => {
                 // Apple's keychain_default CLI passes NULL to SecKeychainSetDomainDefault
                 // when -s has no path, restoring this run's initially absent default.
-                await security(["default-keychain", "-d", "user", "-s", ...originalDefault], engineEnv);
+                await security(["default-keychain", "-d", "user", "-s", ...originalDefault], engineEnv).catch(error => {
+                    if (!(missingOwnedDefault && error.code === 1 && /A default keychain could not be found/iu.test(error.stderr ?? ""))) throw error;
+                });
                 await security(["list-keychains", "-d", "user", "-s", ...originalList], engineEnv);
-                assert(keychain.startsWith(root + sep));
+                assert(keychain.startsWith(paths.home + sep));
+                assert.equal(await realpath(dirname(keychain)), join(await realpath(paths.home), "Library/Keychains"));
                 await security(["delete-keychain", keychain], engineEnv);
                 if (missingOwnedDefault) {
                     const absent = await security(["default-keychain", "-d", "user"], engineEnv).then(() => false, error => error.code === 1 && /A default keychain could not be found/iu.test(error.stderr ?? ""));
@@ -345,6 +364,13 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             await security(["unlock-keychain", "-p", keychainPassword, keychain], engineEnv);
             await security(["list-keychains", "-d", "user", "-s", keychain], engineEnv);
             await security(["default-keychain", "-d", "user", "-s", keychain], engineEnv);
+            const configuredDefault = keychains(await securityRead("default-keychain", engineEnv, "owned-home-after-setup"));
+            const configuredList = keychains(await securityRead("list-keychains", engineEnv, "owned-home-after-setup"));
+            const status = JSON.parse(await command(homeProbe, ["--keychain", keychain], { env: engineEnv, timeout: 30000 }));
+            report.keychainConfiguredReadback = { default: configuredDefault, searchList: configuredList, keychain, status };
+            assert.deepEqual(configuredDefault, [keychain]);
+            assert.deepEqual(configuredList, [keychain]);
+            assert(status.openStatus === 0 && status.status === 0 && status.unlocked === true && status.readable === true && status.writable === true, "Owned native keychain must be unlocked and accessible");
             assert.deepEqual(keychains(await security(["default-keychain", "-d", "user"], safeEnv)), actualDefault);
             assert.deepEqual(keychains(await security(["list-keychains", "-d", "user"], safeEnv)), actualList);
             report.keychainCalibration = { ownedDisposableUnlockedDefault: true, cryptoMocked: false, electronItemPreseeded: false, trustStoreModified: false };
@@ -527,6 +553,24 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             }
             const secrets = [username, password, inferenceToken, socketToken];
             report.engineStartDiagnostic = { redactionRan: true, beforeAppAndAccountLogin: true, stdout: engineDiagnosticText(error.stdout, secrets), stderr: engineDiagnosticText(error.stderr, secrets) };
+            if (windows && fixtureEnvironment) {
+                // Read-only paired probes isolate inherited PowerShell Core module
+                // paths from Windows PowerShell5 without changing ACL policy.
+                const probe = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+[void][Reflection.Assembly]::LoadWithPartialName('System.Web.Extensions')
+$commands=@(foreach($name in @('Get-Item','Get-Acl')){try{$cmd=Get-Command $name -ErrorAction Stop;@{name=$name;available=$true;source=$cmd.Source;moduleVersion=$cmd.Module.Version.ToString()}}catch{@{name=$name;available=$false;errorId=$_.FullyQualifiedErrorId;category=$_.CategoryInfo.Category.ToString()}}})
+$directories=@(foreach($path in ($env:OWNED_DIRECTORIES_PROBE -split '\\|')){try{$item=Get-Item -LiteralPath $path -Force -ErrorAction Stop;$row=@{path=$path;exists=$true;attributes=$item.Attributes.ToString();setAccessControlMethod=($null -ne $item.PSObject.Methods['SetAccessControl'])};try{$row.owner=(Get-Acl -LiteralPath $path -ErrorAction Stop).Owner}catch{$row.ownerErrorId=$_.FullyQualifiedErrorId};$row}catch{@{path=$path;exists=$false;errorId=$_.FullyQualifiedErrorId;category=$_.CategoryInfo.Category.ToString()}}})
+$result=@{edition=$PSVersionTable.PSEdition;version=$PSVersionTable.PSVersion.ToString();modulePath=$env:PSModulePath;commands=$commands;directories=$directories}
+[Console]::Out.WriteLine(([System.Web.Script.Serialization.JavaScriptSerializer]::new()).Serialize($result))`;
+                report.windowsPrivateDirectoryProbe = [];
+                const withoutModulePath = Object.fromEntries(Object.entries(fixtureEnvironment).filter(([key]) => key.toLowerCase() !== "psmodulepath"));
+                for (const [kind, environment] of [["same-engine-environment", fixtureEnvironment], ["without-inherited-module-path", withoutModulePath]]) {
+                    try {
+                        const output = await command(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", probe], { env: { ...environment, OWNED_DIRECTORIES_PROBE: [paths.root, paths.happyHome, paths.agentHome].join("|") }, timeout: 30000 });
+                        report.windowsPrivateDirectoryProbe.push({ kind, success: true, result: JSON.parse(output) });
+                    } catch (probeError) { report.windowsPrivateDirectoryProbe.push({ kind, success: false, command: probeError?.cyberaiCommand ?? null }); }
+                }
+            }
         }
         if (page && !page.isClosed()) report.failureUi = await page.evaluate(() => {
             const login = document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"]');
