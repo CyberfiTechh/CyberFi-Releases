@@ -17,6 +17,10 @@ on:
             sha256:
                 type: string
                 required: true
+            accessory_container:
+                type: boolean
+                default: false
+                description: Use a declared ad-hoc accessory test copy with identical ASAR, MCP sources and fuse states
 
 permissions:
     contents: read
@@ -33,6 +37,7 @@ jobs:
             RELEASE_ID: ${{ inputs.release_id }}
             ASSET_ID: ${{ inputs.asset_id }}
             EXPECTED_SHA: ${{ inputs.sha256 }}
+            DERIVED_ACCESSORY_CONTAINER: ${{ inputs.accessory_container }}
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
               with:
@@ -91,6 +96,7 @@ jobs:
                   path: |
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/mcp-acceptance.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/normal-caller-precondition.json
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/derived-container.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/setup-report.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/*.setup.log
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/triangle.html

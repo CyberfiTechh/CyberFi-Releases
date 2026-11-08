@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { withMcpCallerPrecondition } from "./mcp-acceptance-fixture.mjs";
+import { prepareMcpAccessoryContainer } from "./macos-mcp-container.mjs";
 
 const [upstream, executable] = process.argv.slice(2);
 assert(process.platform === "darwin" && upstream && executable);
@@ -22,6 +23,8 @@ Object.assign(env, { HOME: home, USERPROFILE: home,
     CYBERFI_MCP_ACCEPTANCE_REPORT: report });
 const { gymElectronProcessRun } = await import(pathToFileURL(join(resolve(upstream),
     "packages/happy-desktop-gym/sources/electron/launch.ts")).href);
+const target = process.env.DERIVED_ACCESSORY_CONTAINER === "true"
+    ? await prepareMcpAccessoryContainer(executable, root) : resolve(executable);
 console.log("Fresh isolated MCP runtime:", root);
 const progress = setInterval(async () => {
     try {
@@ -33,7 +36,7 @@ const progress = setInterval(async () => {
 }, 30_000);
 let exit;
 try {
-    exit = await withMcpCallerPrecondition(root, gymElectronProcessRun({ executablePath: resolve(executable),
+    exit = await withMcpCallerPrecondition(root, gymElectronProcessRun({ executablePath: target,
         args: ["--user-data-dir=" + userData], env, timeout: 40 * 60_000 }));
 } finally { clearInterval(progress); }
 assert.equal(exit.exitCode, 0, exit.output);
