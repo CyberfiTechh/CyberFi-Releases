@@ -45,6 +45,11 @@ async function hashFile(path) {
 }
 const privateEnvironment = /TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|CYBERAI_USERNAME|NODE_OPTIONS|ELECTRON_RUN_AS_NODE|SMOKE_REPORT|SMOKE_SCREENSHOT|VITE_DEV_SERVER_URL|ACCEPTANCE_ARTIFACTS/iu;
 function sanitizedEnvironment(source) { return Object.fromEntries(Object.entries(source).filter(([key, value]) => value !== undefined && !privateEnvironment.test(key))); }
+function environmentValue(environment, name) {
+    const key = Object.keys(environment).find(key => key.toLowerCase() === name.toLowerCase());
+    assert(key && environment[key], "Required native system environment missing");
+    return environment[key];
+}
 
 async function main() {
     const target = process.env.TARGET;
@@ -66,7 +71,7 @@ async function main() {
     const report = { success: false, platform: target, version: VERSION, sourceCommit: SOURCE_COMMIT, sourceCommitEvidence: "reviewed-build-provenance", artifact: pins, checks: {}, videos: [], errors: [], limits: ["Packaged app does not embed source attestation; source commit is bound through reviewed build provenance and exact independently RSA-verified asset pins.", "CI does not certify browser-download Gatekeeper trust.", "macOS hidden startup may transiently have a regular Dock activation policy; only no onscreen window and no focus are certified here."] };
     const save = () => writeFile(join(evidence, "cyberai-login.json"), JSON.stringify(report, null, 2) + "\n");
     const command = async (file, args, options = {}) => (await exec(file, args, { env: safeEnv, timeout: 120000, windowsHide: true, maxBuffer: 8 * 1024 ** 2, ...options })).stdout.trim();
-    const ps = windows ? join(safeEnv.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe") : undefined;
+    const ps = windows ? join(environmentValue(safeEnv, "SystemRoot"), "System32/WindowsPowerShell/v1.0/powershell.exe") : undefined;
     const powershell = script => command(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
     const quote = value => "'" + value.replaceAll("'", "''") + "'";
     async function windowsSignature(path) {
@@ -154,7 +159,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         if (windows) {
             // Trust is not altered. Verify the pinned Authenticode signer and cryptographic signature.
             report.signature = { installer: await windowsSignature(artifact) };
-            const seven = join(safeEnv.ProgramFiles, "7-Zip/7z.exe"), outer = join(root, "nsis"), inner = join(applications, "CyberFi");
+            const seven = join(environmentValue(safeEnv, "ProgramFiles"), "7-Zip/7z.exe"), outer = join(root, "nsis"), inner = join(applications, "CyberFi");
             await command(seven, ["x", "-y", artifact, "-o" + outer]);
             const archives = await findFiles(outer, "app-64.7z"); assert.equal(archives.length, 1);
             await command(seven, ["x", "-y", archives[0], "-o" + inner]); executable = join(inner, "CyberFi.exe");
@@ -413,6 +418,9 @@ if (process.argv.includes("--self-test")) {
     for (const value of ["http://github.com/a", "https://api.github.com.evil.test/a", "https://a@github.com/a"]) assert.throws(() => allowedRedirect(value));
     assert.equal(allowedRedirect("https://release-assets.githubusercontent.com/file").protocol, "https:");
     assert.deepEqual(sanitizedEnvironment({ PATH: "ok", CYBERAI_USERNAME: "private", CYBERAI_PASSWORD: "private", GH_TOKEN: "private", ACCEPTANCE_ARTIFACTS: "private", SOME_API_KEY: "private" }), { PATH: "ok" });
+    assert.equal(environmentValue({ SYSTEMROOT: "system", PROGRAMFILES: "programs" }, "SystemRoot"), "system");
+    assert.equal(environmentValue({ SYSTEMROOT: "system", PROGRAMFILES: "programs" }, "ProgramFiles"), "programs");
+    assert.throws(() => environmentValue({}, "SystemRoot"));
     assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.125-x64.exe", pin.sha256, 10));
     console.log("Strict artifact pins, redirect refusal, independent RSA refusal and credential environment isolation passed. No app or network used.");
 } else await main();
