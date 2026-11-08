@@ -47,9 +47,10 @@ jobs:
                   pnpm install --frozen-lockfile --ignore-scripts
                   pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
             - name: Verify immutable inputs, actual GUI download and native handoff
+              working-directory: upstream
               env:
                   GH_TOKEN: ${{ github.token }}
-              run: node acceptance/scripts/verify-macos-app-update.mjs "$GITHUB_WORKSPACE/upstream"
+              run: node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-macos-app-update.mjs" "$GITHUB_WORKSPACE/upstream"
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
