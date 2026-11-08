@@ -20,7 +20,7 @@ using System.Text;
 
 public static class CyberFiOwnedLaunch {
     public static string Stage = "initialize";
-    public static string CreationApi = "none", TokenMode = "unknown";
+    public static string CreationApi = "none", TokenMode = "unknown", DesktopMode = "inherited";
     public static bool SelectedTokenVerified = false;
     const uint Query = 8, Suspended = 4, UnicodeEnvironment = 0x400, NoWindow = 0x08000000;
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -174,6 +174,8 @@ public static class CyberFiOwnedLaunch {
             if (tokenMode == "restricted-medium") {
                 // Windows documents CreateProcessAsUser for a restricted version of the caller's own token.
                 CreationApi = "CreateProcessAsUserW";
+                // Select the existing user desktop instead of inheriting a privileged launcher's station.
+                startup.desktop = @"winsta0\default"; DesktopMode = "existing-user-desktop";
                 Check(CreateProcessAsUserW(launchToken, executable, command, IntPtr.Zero, IntPtr.Zero, false, flags, environment, Path.GetDirectoryName(executable), ref startup, out child));
             } else if (elevated) {
                 CreationApi = "CreateProcessWithTokenW";
@@ -247,7 +249,7 @@ exit 23
             $selfTestDiagnostic.environmentPreserved = $probe.environmentPreserved -eq $true
             [CyberFiOwnedLaunch]::Stage = 'selftest-assertions'
             if (-not $probe.environmentPreserved -or $result.exitCode -ne 23 -or -not $result.sameSid -or $result.elevated) { throw 'Owned launcher self-test failed.' }
-            [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; creationApi=[CyberFiOwnedLaunch]::CreationApi; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
+            [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; creationApi=[CyberFiOwnedLaunch]::CreationApi; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
         } finally {
             $probeStage = [CyberFiOwnedLaunch]::Stage
             [CyberFiOwnedLaunch]::Stage = 'selftest-cleanup'
@@ -283,6 +285,6 @@ exit 23
         if ($cause -is [ComponentModel.Win32Exception]) { $nativeError = $cause.NativeErrorCode; break }
         $cause = $cause.InnerException
     }
-    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified; selfTest=$selfTestDiagnostic } | ConvertTo-Json -Compress))
+    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified; selfTest=$selfTestDiagnostic } | ConvertTo-Json -Compress))
     exit 1
 }
