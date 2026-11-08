@@ -287,6 +287,15 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const systemNames = new Set(["path", "systemroot", "windir", "comspec", "pathext", "psmodulepath", "systemdrive", "programfiles", "programfiles(x86)", "programw6432", "commonprogramfiles", "commonprogramfiles(x86)", "commonprogramw6432", "programdata", "allusersprofile", "public", "userdomain", "userdnsdomain", "username", "computername", "os", "processor_architecture", "processor_identifier", "number_of_processors", "sessionname", "temp", "tmp"]);
         const systemEnv = Object.fromEntries(Object.entries(safeEnv).filter(([key]) => systemNames.has(key.toLowerCase())));
         const engineEnv = { ...systemEnv, ...gymHostEnvironment(paths), HAPPY_HOME_DIR: paths.happyHome, HAPPY_AGENT_PROJECTS_DIRECTORY: paths.projects, HAPPY_AGENT_WORKSPACES_DIRECTORY: paths.workspaces, HAPPY_AGENT_SERVER_SOCKET_PATH: paths.socketPath, HAPPY_AGENT_SERVER_TOKEN_PATH: paths.tokenPath, HAPPY_GYM_INFERENCE_URL: `http://127.0.0.1:${inference.address().port}/inference`, HAPPY_GYM_TOKEN: inferenceToken };
+        if (windows) {
+            // The paired native probe proved the runner's inherited Core module
+            // path breaks Windows PowerShell5 after HOME isolation. Keep the
+            // real engine ACL initializer and supply its native system modules.
+            const moduleKey = Object.keys(engineEnv).find(key => key.toLowerCase() === "psmodulepath") ?? "PSModulePath";
+            const modules = [join(environmentValue(safeEnv, "SystemRoot"), "System32/WindowsPowerShell/v1.0/Modules"), join(environmentValue(safeEnv, "ProgramFiles"), "WindowsPowerShell/Modules")];
+            engineEnv[moduleKey] = modules.join(";");
+            report.engineEnvironmentCalibration = { nativeWindowsPowerShellModules: modules, inheritedModulePathReplaced: true, privateDirectoryAclBypassed: false };
+        }
         fixtureEnvironment = engineEnv;
         if (!windows) {
             stage = "native Keychain environment preflight";
@@ -368,8 +377,12 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
             const configuredList = keychains(await securityRead("list-keychains", engineEnv, "owned-home-after-setup"));
             const status = JSON.parse(await command(homeProbe, ["--keychain", keychain], { env: engineEnv, timeout: 30000 }));
             report.keychainConfiguredReadback = { default: configuredDefault, searchList: configuredList, keychain, status };
-            assert.deepEqual(configuredDefault, [keychain]);
-            assert.deepEqual(configuredList, [keychain]);
+            assert.equal(configuredDefault.length, 1); assert.equal(configuredList.length, 1);
+            const physicalKeychain = await realpath(keychain);
+            assert(physicalKeychain.startsWith(await realpath(paths.home) + sep));
+            assert.equal(await realpath(configuredDefault[0]), physicalKeychain);
+            assert.equal(await realpath(configuredList[0]), physicalKeychain);
+            report.keychainConfiguredReadback.physicalPath = physicalKeychain;
             assert(status.openStatus === 0 && status.status === 0 && status.unlocked === true && status.readable === true && status.writable === true, "Owned native keychain must be unlocked and accessible");
             assert.deepEqual(keychains(await security(["default-keychain", "-d", "user"], safeEnv)), actualDefault);
             assert.deepEqual(keychains(await security(["list-keychains", "-d", "user"], safeEnv)), actualList);
