@@ -11,6 +11,7 @@ import { createServer } from "node:http";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
+import { EventEmitter } from "node:events";
 
 const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.125";
 const SOURCE_COMMIT = "ac2f66476304f69e39913d5726b34f65ea7698ab";
@@ -49,6 +50,17 @@ function environmentValue(environment, name) {
     const key = Object.keys(environment).find(key => key.toLowerCase() === name.toLowerCase());
     assert(key && environment[key], "Required native system environment missing");
     return environment[key];
+}
+function watcherReady(child) {
+    return new Promise((done, reject) => {
+        let text = "";
+        const finish = error => { clearTimeout(timer); child.stderr.off("data", data); child.off("error", failed); child.off("close", closed); error ? reject(error) : done(); };
+        const data = value => { text = (text + value.toString()).slice(-4096); if (text.includes("ready")) finish(); };
+        const failed = () => finish(Error("Native visibility observer failed"));
+        const closed = () => finish(Error("Native visibility observer exited before readiness"));
+        const timer = setTimeout(() => finish(Error("Native visibility observer readiness timed out")), 60000);
+        child.stderr.on("data", data); child.once("error", failed); child.once("close", closed);
+    });
 }
 
 async function main() {
@@ -122,7 +134,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         }
         return found;
     }
-    let executable, mounted, runtime, inference, paths, browser, page, video, run, runResult, runError, ownedPid, watcher, visibilityDone, watcherStop;
+    let executable, mounted, runtime, inference, paths, browser, page, video, run, runResult, runError, ownedPid, watcher, visibilityDone, watcherStop, keychainCleanup;
     let stage = "artifact verification";
     const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
     async function processProof(pid) {
@@ -140,8 +152,13 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         if (!ownedPid || !alive(ownedPid)) return;
         assert(executable.startsWith(root + sep)); await processProof(ownedPid);
         process.kill(ownedPid, "SIGTERM");
-        const until = Date.now() + 20000;
+        let until = Date.now() + 10000;
         while (alive(ownedPid) && Date.now() < until) await delay(100);
+        if (alive(ownedPid)) {
+            await processProof(ownedPid); process.kill(ownedPid, "SIGKILL");
+            report.verifiedOwnedForcedTerminations = (report.verifiedOwnedForcedTerminations ?? 0) + 1;
+            until = Date.now() + 10000; while (alive(ownedPid) && Date.now() < until) await delay(100);
+        }
         assert(!alive(ownedPid), "Owned app did not terminate");
         await run; assert(runResult && !runError, "Owned app exit not observed"); ownedPid = undefined;
     }
@@ -168,7 +185,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             report.signature.executable = await windowsSignature(executable);
             // Observe all HWNDs of the exact owned binary continuously, including startup.
             watcherStop = join(root, "visibility-stop");
-            const watcherSource = `$ErrorActionPreference='Stop'
+            const watcherSource = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
 public class CyberAiWindowProof {
@@ -196,7 +213,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             watcher = spawn(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(watcherSource, "utf16le").toString("base64")], { env: { ...safeEnv, WATCH_EXE: executable, WATCH_PROFILE: profile, WATCH_STOP: watcherStop }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
             let output = ""; watcher.stdout.on("data", value => { output += value; });
             visibilityDone = new Promise((done, reject) => { watcher.on("error", reject); watcher.on("close", code => code === 0 ? done(JSON.parse(output)) : reject(Error("Visibility watcher failed"))); }); visibilityDone.catch(() => undefined);
-            await new Promise((done, reject) => { watcher.stderr.once("data", value => value.toString().includes("ready") ? done() : reject(Error("Visibility observer not ready"))); watcher.once("error", reject); });
+            await watcherReady(watcher);
         } else {
             await command("/usr/bin/hdiutil", ["verify", artifact]); mounted = join(root, "mount"); await mkdir(mounted);
             await command("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mounted, artifact]);
@@ -212,7 +229,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             watcher = spawn(watchBinary, ["--bundle", app], { env: safeEnv, stdio: ["ignore", "pipe", "pipe"] });
             let output = ""; watcher.stdout.on("data", value => { output += value; });
             visibilityDone = new Promise((done, reject) => { watcher.on("error", reject); watcher.on("close", code => code === 0 ? done(JSON.parse(output)) : reject(Error("Visibility watcher failed"))); }); visibilityDone.catch(() => undefined);
-            await new Promise((done, reject) => { watcher.stderr.once("data", value => value.toString().includes("ready") ? done() : reject(Error("Visibility observer not ready"))); watcher.once("error", reject); });
+            await watcherReady(watcher);
         }
         report.binaryIdentity = { rsaVerified: true, executableSha256: await hashFile(executable), quarantineModified: false, fusesModified: false };
         stage = "owned engine fixture";
@@ -242,6 +259,33 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const systemNames = new Set(["path", "systemroot", "windir", "comspec", "pathext", "psmodulepath", "systemdrive", "programfiles", "programfiles(x86)", "programw6432", "commonprogramfiles", "commonprogramfiles(x86)", "commonprogramw6432", "programdata", "allusersprofile", "public", "userdomain", "userdnsdomain", "username", "computername", "os", "processor_architecture", "processor_identifier", "number_of_processors", "sessionname", "temp", "tmp"]);
         const systemEnv = Object.fromEntries(Object.entries(safeEnv).filter(([key]) => systemNames.has(key.toLowerCase())));
         const engineEnv = { ...systemEnv, ...gymHostEnvironment(paths), HAPPY_HOME_DIR: paths.happyHome, HAPPY_AGENT_PROJECTS_DIRECTORY: paths.projects, HAPPY_AGENT_WORKSPACES_DIRECTORY: paths.workspaces, HAPPY_AGENT_SERVER_SOCKET_PATH: paths.socketPath, HAPPY_AGENT_SERVER_TOKEN_PATH: paths.tokenPath, HAPPY_GYM_INFERENCE_URL: `http://127.0.0.1:${inference.address().port}/inference`, HAPPY_GYM_TOKEN: inferenceToken };
+        if (!windows) {
+            stage = "native Keychain environment preflight";
+            const security = (args, env) => command("/usr/bin/security", args, { env, timeout: 30000 });
+            const keychains = output => output.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).map(line => { const value = JSON.parse(line); assert(typeof value === "string" && value.startsWith("/") && !value.includes("\n")); return value; });
+            const originalDefault = keychains(await security(["default-keychain", "-d", "user"], engineEnv));
+            const originalList = keychains(await security(["list-keychains", "-d", "user"], engineEnv));
+            const actualDefault = keychains(await security(["default-keychain", "-d", "user"], safeEnv));
+            assert(originalDefault.length === 1 && actualDefault.length === 1 && originalList.length <= 20, "Native user keychain baseline missing");
+            const keychain = join(root, "owned-login.keychain-db"), keychainPassword = randomBytes(32).toString("hex");
+            report.keychainPreflight = { runnerDefault: actualDefault[0], ownedHomeDefault: originalDefault[0], searchListCount: originalList.length, runnerHome: safeEnv.HOME, ownedHome: engineEnv.HOME, cfFixedUserHomePresent: !!safeEnv.CFFIXED_USER_HOME };
+            report.keychainPreflight.defaultMetadataReadable = await security(["show-keychain-info", originalDefault[0]], engineEnv).then(() => true, () => false);
+            keychainCleanup = async () => {
+                await security(["default-keychain", "-d", "user", "-s", originalDefault[0]], engineEnv);
+                await security(["list-keychains", "-d", "user", "-s", ...originalList], engineEnv);
+                assert(keychain.startsWith(root + sep));
+                await security(["delete-keychain", keychain], engineEnv);
+                assert.deepEqual(keychains(await security(["default-keychain", "-d", "user"], engineEnv)), originalDefault);
+                assert.deepEqual(keychains(await security(["list-keychains", "-d", "user"], engineEnv)), originalList);
+            };
+            await security(["create-keychain", "-p", keychainPassword, keychain], engineEnv);
+            await security(["set-keychain-settings", "-lut", "21600", keychain], engineEnv);
+            await security(["unlock-keychain", "-p", keychainPassword, keychain], engineEnv);
+            await security(["list-keychains", "-d", "user", "-s", keychain, ...originalList], engineEnv);
+            await security(["default-keychain", "-d", "user", "-s", keychain], engineEnv);
+            report.keychainCalibration = { ownedDisposableUnlockedDefault: true, cryptoMocked: false, electronItemPreseeded: false, trustStoreModified: false };
+        }
+        stage = "owned engine fixture";
         const config = join(paths.root, windows ? "happy/config" : "Happy/Config"); await mkdir(config, { recursive: true });
         for (const name of [".config", ".cache", ".local/share", ".local/state", "AppData/Local", "AppData/Roaming"]) await mkdir(join(paths.home, name), { recursive: true });
         await writeFile(join(config, "happy.toml"), '[settings]\nhappy_integration = false\nmenu_bar = false\n\n[providers.codex]\ntype = "codex"\nenabled = true\ncredential_isolation = true\n');
@@ -336,7 +380,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             assert(!/token|password|encrypted/iu.test(JSON.stringify(Object.keys(account))) && !JSON.stringify(account).includes(password), "Account snapshot leaked protected fields");
             assert.equal(await login().count(), 0);
         }
-        stage = "initial login"; await launch("login-lifetime"); await waitLogin();
+        stage = "initial login screen"; await launch("login-lifetime"); await waitLogin();
         assert.match(await login().innerText(), /CyberFi/u); assert.equal(await login().locator('input[name="password"]').getAttribute("type"), "password");
         const remember = login().getByRole("checkbox", { name: "Beni hatırla" }); assert.equal(await remember.isChecked(), false);
         await login().getByRole("button", { name: "Şifreyi göster", exact: true }).click();
@@ -350,17 +394,22 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             let id; try { id = guest.getWebContentsId(); } catch { /* Main refused guest attachment. */ }
             guest.remove(); return !attached && !id;
         }); assert(guestDenied, "Known preview partition attached before authentication"); report.checks.signedOutGuestAttachmentRefused = true;
+        stage = "generic wrong-password login";
         await login().locator('input[name="username"]').fill(username); await login().locator('input[name="password"]').fill("invalid-" + randomBytes(12).toString("hex"));
         await login().getByRole("button", { name: "Giriş yap", exact: true }).click();
         await page.waitForFunction(async () => { const value = await window.happyDesktop.cyberFiAccountGet(); return value.status === "signedOut" && !!value.error; });
         const rejection = await page.evaluate(async () => (await window.happyDesktop.cyberFiAccountGet()).error);
         assert(rejection && !/stack|sqlite|token|http|exception/iu.test(rejection) && !rejection.includes(username) && !rejection.includes(password)); await denied();
+        report.checks.wrongPasswordGeneric = true;
+        stage = "native remembered login availability and authentication";
         await login().locator('input[name="password"]').fill(password); await remember.check();
         await login().getByRole("button", { name: "Giriş yap", exact: true }).click(); await accountReady();
+        stage = "encrypted remembered-session file";
         const saved = join(configDir, "cyberai-account.json"), savedText = await readFile(saved, "utf8"), sealed = JSON.parse(savedText);
         assert.deepEqual(Object.keys(sealed).sort(), ["encrypted", "version"]); assert.equal(sealed.version, 1); assert.match(sealed.encrypted, /^[A-Za-z0-9+/]+={0,2}$/u);
         assert(!savedText.includes(username) && !savedText.includes(password));
         report.checks.initialLogin = true; report.checks.privilegedIpcDenied = true; report.checks.wrongPasswordGeneric = true; report.checks.nativeEncryptedStorage = true;
+        stage = "first native app termination";
         const firstPid = ownedPid; await endVideo(); await stopOwned(); await browser.close(); browser = undefined; page = undefined;
         stage = "native remembered relaunch"; await launch("reopened-lifetime"); assert.notEqual(ownedPid, firstPid); await accountReady();
         await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]'), undefined, { timeout: 60000 });
@@ -392,9 +441,17 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         await client.getHealth(); report.checks.forcedLogoutReload = true; report.checks.savedCredentialRemoved = true; report.checks.profileAndSkillsPreserved = true; report.checks.engineStillHealthy = true;
         report.inferenceFixture = { localOnly: true, calls: inferenceCalls, externalProviderCalls: 0 };
         await endVideo(); await stopOwned(); report.success = true;
-    } catch {
+    } catch (error) {
         // Never serialize browser/HTTP/native error messages: they can include input credentials.
         report.errors.push("Native acceptance failed during " + stage);
+        report.failureKind = ["Error", "AssertionError", "TimeoutError", "TypeError"].includes(error?.name) ? error.name : "native-error";
+        if (typeof error?.code === "string" && /^[A-Z_0-9]{1,64}$/u.test(error.code)) report.failureCode = error.code;
+        if (page && !page.isClosed()) report.failureUi = await page.evaluate(() => {
+            const login = document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"]');
+            const text = login?.textContent ?? "";
+            return { loginVisible: !!login, busy: text.includes("Giriş yapılıyor"), wrongPasswordBanner: text.includes("Kullanıcı adı veya şifre hatalı."), secureStorageUnavailableBanner: text.includes("Güvenli depolama kullanılamıyor"), usernameDisabled: login?.querySelector('input[name="username"]')?.disabled === true, passwordDisabled: login?.querySelector('input[name="password"]')?.disabled === true };
+        }).catch(() => ({ rendererUnavailable: true }));
+        report.rememberedFileExistsAtFailure = await lstat(join(profile, "desktop/cyberai-account.json")).then(() => true, () => false);
     } finally {
         if (video) { try { const value = await video.stop(); report.videos.push({ framesReceived: value.framesReceived, framesWritten: value.framesWritten }); } catch { report.success = false; } }
         try { await stopOwned(); } catch { report.success = false; report.errors.push("Owned app cleanup failed identity or exit verification"); }
@@ -405,6 +462,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             try { report.visibility = await visibilityDone; if (!(report.visibility.systemWindowsMax > 0 && report.visibility.onscreenSamples === 0 && report.visibility.activeSamples === 0 && report.visibility.pids.length === 2)) report.success = false; } catch { report.success = false; }
         }
         if (mounted) await command("/usr/bin/hdiutil", ["detach", mounted]).catch(() => undefined);
+        if (keychainCleanup) { try { await keychainCleanup(); report.keychainRestored = true; } catch { report.success = false; report.errors.push("Owned disposable keychain cleanup failed"); } }
         await save();
     }
     assert(report.success && report.videos.length === 2, "Native login acceptance incomplete; inspect redacted cyberai-login.json");
@@ -421,6 +479,10 @@ if (process.argv.includes("--self-test")) {
     assert.equal(environmentValue({ SYSTEMROOT: "system", PROGRAMFILES: "programs" }, "SystemRoot"), "system");
     assert.equal(environmentValue({ SYSTEMROOT: "system", PROGRAMFILES: "programs" }, "ProgramFiles"), "programs");
     assert.throws(() => environmentValue({}, "SystemRoot"));
+    const child = new EventEmitter(); child.stderr = new EventEmitter();
+    const readiness = watcherReady(child);
+    child.stderr.emit("data", Buffer.from("#< CLIXML\n")); child.stderr.emit("data", Buffer.from("rea")); child.stderr.emit("data", Buffer.from("dy\n"));
+    await readiness; assert.equal(child.stderr.listenerCount("data"), 0);
     assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.125-x64.exe", pin.sha256, 10));
     console.log("Strict artifact pins, redirect refusal, independent RSA refusal and credential environment isolation passed. No app or network used.");
 } else await main();
