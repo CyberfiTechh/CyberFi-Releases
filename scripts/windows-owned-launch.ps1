@@ -5,6 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$selfTestDiagnostic = $null
 
 # Test launcher only: a linked token can lower this same user's privileges, never raise them.
 Add-Type -TypeDefinition @'
@@ -234,18 +235,30 @@ if(-not $match){exit 19}
 exit 23
 '@
         $probeExecutable = (Get-Process -Id $PID).Path
+        $selfTestDiagnostic = [ordered]@{ childExitCode=$null; receiptExists=$false; receiptBytes=$null; environmentPreserved=$null; cleanupSucceeded=$false }
         try {
             $result = [CyberFiOwnedLaunch]::Run($probeExecutable, @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probeCode))))
+            [CyberFiOwnedLaunch]::Stage = 'selftest-receipt'
+            $selfTestDiagnostic.childExitCode = $result.exitCode
+            $selfTestDiagnostic.receiptExists = Test-Path -LiteralPath $probeReport
+            if ($selfTestDiagnostic.receiptExists) { $selfTestDiagnostic.receiptBytes = (Get-Item -LiteralPath $probeReport).Length }
+            if (-not $selfTestDiagnostic.receiptExists -or $selfTestDiagnostic.receiptBytes -gt 256) { throw 'Owned self-test receipt missing or oversized.' }
             $probe = Get-Content -LiteralPath $probeReport -Raw | ConvertFrom-Json
+            $selfTestDiagnostic.environmentPreserved = $probe.environmentPreserved -eq $true
+            [CyberFiOwnedLaunch]::Stage = 'selftest-assertions'
             if (-not $probe.environmentPreserved -or $result.exitCode -ne 23 -or -not $result.sameSid -or $result.elevated) { throw 'Owned launcher self-test failed.' }
             [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; creationApi=[CyberFiOwnedLaunch]::CreationApi; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
         } finally {
+            $probeStage = [CyberFiOwnedLaunch]::Stage
+            [CyberFiOwnedLaunch]::Stage = 'selftest-cleanup'
             Assert-NoReparsePoint $probeRoot
             if (Test-Path -LiteralPath $probeReport) {
                 Assert-NoReparsePoint $probeReport
                 [IO.File]::Delete($probeReport)
             }
             [IO.Directory]::Delete($probeRoot, $false)
+            $selfTestDiagnostic.cleanupSucceeded = $true
+            [CyberFiOwnedLaunch]::Stage = $probeStage
         }
         exit 0
     }
@@ -270,6 +283,6 @@ exit 23
         if ($cause -is [ComponentModel.Win32Exception]) { $nativeError = $cause.NativeErrorCode; break }
         $cause = $cause.InnerException
     }
-    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified } | ConvertTo-Json -Compress))
+    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified; selfTest=$selfTestDiagnostic } | ConvertTo-Json -Compress))
     exit 1
 }
