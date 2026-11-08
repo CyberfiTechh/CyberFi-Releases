@@ -75,7 +75,7 @@ jobs:
                   p.write_text(text.replace(before,'license-files = [ "LICENSE", "LICENSE.APACHE", "LICENSE.BSD", "LICENSE.OPENSSL" ]'))
                   PY
                   mkdir "$PROOF/wheels"
-                  OPENSSL_DIR="$WORK/openssl-static" OPENSSL_STATIC=1 OPENSSL_NO_VENDOR=1 \
+                  PATH="$WORK/build-venv/bin:$PATH" OPENSSL_DIR="$WORK/openssl-static" OPENSSL_STATIC=1 OPENSSL_NO_VENDOR=1 \
                     "$WORK/build-venv/bin/python" -m pip wheel --no-build-isolation --no-deps --no-cache-dir \
                     --wheel-dir "$PROOF/wheels" "$WORK/cryptography-50.0.2"
                   python - <<'PY'
