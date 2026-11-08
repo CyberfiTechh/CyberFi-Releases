@@ -1,4 +1,4 @@
-param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [ValidateSet("0.0.115", "0.0.116", "0.0.117")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [ValidateSet("0.0.115", "0.0.116", "0.0.117")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
@@ -14,6 +14,9 @@ if ($TargetVersion -eq '0.0.117') {
     $expected[$TargetVersion] = $TargetSha256
 }
 
+if ($InApp117) {
+    Assert-True ($Upgrade115 -and -not $Mcp115 -and $TargetVersion -eq '0.0.117') 'In-app GUI mode is only the bounded116-to117 upgrade'
+}
 function Get-UpgradeSource([string]$Target) {
     switch ($Target) {
         '0.0.115' { '0.0.114' }
@@ -271,6 +274,18 @@ assert.equal(result.exitCode, 0, result.output);
     'Signed packaged target production MCP bootstrap and nine representative tool calls passed.'
     return
 }
+if ($InApp117) {
+    $engineRoot = Assert-Owned (Join-Path $root 'owned-engine') $root
+    New-Item -ItemType Directory -Path $engineRoot | Out-Null
+    $archive = Join-Path $engineRoot 'engine.tar.gz'
+    Receive-PublishedAsset 'https://github.com/CyberfiTechh/CyberFi-Engine/releases/download/v0.4.116/happy-agent-0.4.116-win32-x64.tar.gz' $archive
+    Assert-True ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ceq 'c406afd9819b1597a816ca1bef4279f05e134a046efda8ccc82d3b47abecef10') 'Published owned engine fixture digest mismatch'
+    $members = @(& tar -tzf $archive)
+    Assert-True ($LASTEXITCODE -eq 0 -and $members.Count -eq 1 -and $members[0] -ceq 'happy-agent-win32-x64.exe') 'Unexpected owned engine archive members'
+    & tar -xzf $archive -C $engineRoot
+    Assert-True ($LASTEXITCODE -eq 0) 'Owned engine extraction failed'
+    $env:ACCEPTANCE_ENGINE_EXE = Join-Path $engineRoot 'happy-agent-win32-x64.exe'
+}
 $env:HAPPY_DESKTOP_SMOKE_REPORT = Join-Path $evidence "fresh-$fromVersion.json"
 $env:HAPPY_DESKTOP_SMOKE_SCREENSHOT = Join-Path $evidence "fresh-$fromVersion.png"
 $fresh = Start-Process -FilePath $installers[$fromVersion] -ArgumentList "/S /D=$installation" -WindowStyle Hidden -PassThru
@@ -314,10 +329,30 @@ $env:HAPPY_DESKTOP_SMOKE_REPORT = Join-Path $evidence "automatic-relaunch-$toVer
 $env:HAPPY_DESKTOP_SMOKE_SCREENSHOT = Join-Path $evidence "automatic-relaunch-$toVersion.png"
 $started = Get-Date
 # These are the production updater's exact NSIS arguments; no manual 114 app launch follows.
-$upgrade = Start-Process -FilePath $installers[$toVersion] -ArgumentList '--updated /S --force-run' -WindowStyle Hidden -PassThru
-Assert-True ($upgrade.WaitForExit(180000) -and $upgrade.ExitCode -eq 0) "Silent $toVersion upgrade failed"
+$installerExitCode = $null
+if ($InApp117) {
+    $env:ACCEPTANCE_UI_ROOT = $root
+    $env:ACCEPTANCE_TARGET_SHA256 = $expected[$toVersion]
+    Push-Location $UpstreamPath
+    try {
+        & node --import tsx (Join-Path $PSScriptRoot 'verify-windows-app-update.mjs') $UpstreamPath
+        Assert-True ($LASTEXITCODE -eq 0) 'Actual signed116 GUI updater capability or real download/handoff failed'
+    } finally { Pop-Location }
+    $uiReport = Get-Content (Join-Path $evidence 'in-app-update.json') -Raw | ConvertFrom-Json
+    Assert-True ($uiReport.success -and $uiReport.clickedActualGuiButton -and $uiReport.video.framesReceived -gt 0) 'Actual GUI/video proof missing'
+    $upgrade = Get-Process -Id $uiReport.ownInstaller.ProcessId -ErrorAction SilentlyContinue
+    if ($upgrade) {
+        Assert-True ($upgrade.WaitForExit(180000)) 'App-owned installer exceeded180seconds'
+        $installerExitCode = $upgrade.ExitCode
+        if ($null -ne $installerExitCode) { Assert-True ($installerExitCode -eq 0) 'App-owned installer reported failure' }
+    }
+} else {
+    $upgrade = Start-Process -FilePath $installers[$toVersion] -ArgumentList '--updated /S --force-run' -WindowStyle Hidden -PassThru
+    Assert-True ($upgrade.WaitForExit(180000) -and $upgrade.ExitCode -eq 0) "Silent $toVersion upgrade failed"
+    $installerExitCode = $upgrade.ExitCode
+}
 $after = Assert-Installed $toVersion
-[ordered]@{ installed = $after; installerExitCode = $upgrade.ExitCode; currentSession = (Get-Process -Id $PID).SessionId;
+[ordered]@{ installed = $after; installerExitCode = $installerExitCode; currentSession = (Get-Process -Id $PID).SessionId;
     processes = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe', 'explorer.exe') } |
         Select-Object Name, ProcessId, ParentProcessId, SessionId, ExecutablePath, CommandLine) } |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidence 'post-upgrade-diagnostic.json') -Encoding utf8
@@ -336,7 +371,7 @@ if ($hiddenRelaunch) {
         $_.Path -eq $exe -and $_.StartTime -ge $started -and $_.MainWindowHandle -ne 0 -and
         [CyberFiQA.NativeWindows]::IsWindowVisible($_.MainWindowHandle) -and $_.MainWindowTitle -eq 'CyberFi'
     } | Select-Object Id, Path, StartTime, SessionId, MainWindowTitle, MainWindowHandle)
-    [ordered]@{ installed = $after; installerExitCode = $upgrade.ExitCode; observedNativeWindows = $nativeWindowEvidence;
+    [ordered]@{ installed = $after; installerExitCode = $installerExitCode; observedNativeWindows = $nativeWindowEvidence;
         currentSession = (Get-Process -Id $PID).SessionId;
         processes = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe', 'explorer.exe') } |
             Select-Object Name, ProcessId, ParentProcessId, SessionId, ExecutablePath, CommandLine) } |
@@ -360,6 +395,10 @@ foreach ($path in $preserve) {
         $prefix = [byte[]]::new($mcpOriginalLength)
         [Array]::Copy($bytes, $prefix, $prefix.Length)
         Assert-True ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($prefix)) -ceq $hashes[$path]) 'Existing MCP bytes changed; only appended defaults are allowed'
+    } elseif ($InApp117 -and $path -eq $settings) {
+        # Normal GUI navigation may persist other configuration fields.
+        $retained = Get-Content $settings -Raw | ConvertFrom-Json
+        Assert-True ($retained.appearance -eq 'dark' -and $retained.defaultPermissionMode -eq 'read_only') 'Selected real GUI preferences changed'
     } else {
         Assert-True ((Get-FileHash $path -Algorithm SHA256).Hash -ceq $hashes[$path]) "Settings/catalogue changed during upgrade: $path"
     }
@@ -368,6 +407,7 @@ if ($hiddenRelaunch) { Assert-True ((Get-Item $env:HAPPY_DESKTOP_SMOKE_REPORT).L
 [ordered]@{ status = 'PASS'; fresh = $before; upgraded = $after; automaticRelaunch = $true;
     hiddenWindowsVerified = $hiddenRelaunch; nativeAutomaticWindow = $nativeWindowEvidence;
     preservedFiles = $preserve; existingMcpBytesPreserved = $true; installerArguments = '--updated /S --force-run';
-    applicationUpdaterDownloadUiTested = $false; note = 'Released installer path tested; app download/button/feed path is a separate test.'
+    applicationUpdaterDownloadUiTested = [bool]$InApp117;
+    note = $(if ($InApp117) { 'Actual signed116 General-settings button/download/app-own installer handoff observed; outer harness verifies automatic117 and selected profile data.' } else { 'Released installer path tested; app download/button/feed path is a separate test.' })
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'result.json') -Encoding utf8
 "Real released $fromVersion install -> $toVersion silent upgrade and automatic relaunch passed."

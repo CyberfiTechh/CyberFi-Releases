@@ -4,6 +4,10 @@ run-name: Verify Windows upgrade to ${{ inputs.target_version }}
 on:
     workflow_dispatch:
         inputs:
+            in_app_update:
+                type: boolean
+                default: false
+                description: Actual signed116 GUI button/download/app-own installer handoff to117
             target_version:
                 type: choice
                 options: ["0.0.115", "0.0.116", "0.0.117"]
@@ -21,9 +25,10 @@ jobs:
         if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
         runs-on: windows-2025
         env:
+            IN_APP_UPDATE: ${{ inputs.in_app_update }}
             TARGET_VERSION: ${{ inputs.target_version || '0.0.115' }}
             TARGET_SHA256: ${{ inputs.target_sha256 }}
-        timeout-minutes: 20
+        timeout-minutes: ${{ inputs.in_app_update && 30 || 20 }}
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
               with:
@@ -45,12 +50,19 @@ jobs:
             - name: Install the public upstream hidden launcher
               working-directory: upstream
               run: pnpm install --frozen-lockfile --ignore-scripts
+            - name: Install mandatory video encoder from the locked public gym dependency
+              if: inputs.in_app_update
+              working-directory: upstream
+              run: pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
             - name: Self-check the acceptance harness
               shell: pwsh
               run: ./acceptance/scripts/verify-windows.ps1 -SelfCheck
             - name: Install previous release and verify target automatic relaunch
               shell: pwsh
-              run: ./acceptance/scripts/verify-windows.ps1 -Upgrade115 -TargetVersion "$env:TARGET_VERSION" -TargetSha256 "$env:TARGET_SHA256" -UpstreamPath "$env:GITHUB_WORKSPACE/upstream"
+              run: |
+                  $params = @{ Upgrade115 = $true; TargetVersion = $env:TARGET_VERSION; TargetSha256 = $env:TARGET_SHA256; UpstreamPath = "$env:GITHUB_WORKSPACE/upstream" }
+                  if ($env:IN_APP_UPDATE -eq 'true') { $params.InApp117 = $true }
+                  ./acceptance/scripts/verify-windows.ps1 @params
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
