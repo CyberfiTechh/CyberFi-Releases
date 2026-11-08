@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
 const DESKTOP_REPO = "CyberfiTechh/CyberFi-Releases";
 const ENGINE_REPO = "CyberfiTechh/CyberFi-Engine";
 function desktopVersion(value) {
-    assert(["0.0.115", "0.0.116"].includes(value));
+    assert(["0.0.116", "0.0.117"].includes(value));
     return value;
 }
 const UPSTREAM_COMMIT = "c9feffb54cdb3591220dafced4070e118e3d297a";
@@ -213,9 +213,10 @@ async function safeResourceLinks(root) {
     }
 }
 function selfTest() {
-    assert.equal(desktopVersion("0.0.115"), "0.0.115");
+    assert.equal(desktopVersion("0.0.117"), "0.0.117");
     assert.equal(desktopVersion("0.0.116"), "0.0.116");
-    assert.throws(() => desktopVersion("0.0.117"));
+    assert.throws(() => desktopVersion("0.0.118"));
+    assert.throws(() => desktopVersion("0.0.115"));
     const sha = "a".repeat(64);
     const release = {
         id: 123,

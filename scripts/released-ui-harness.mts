@@ -505,6 +505,29 @@ try {
             );
             return true;
         });
+    await run("chat PDF opens in right preview while main chat remains usable", async () => {
+        await page.getByRole("button", { name: "qa-support.pdf dosyasını aç", exact: true }).click();
+        await page.getByRole("tab", { name: /Önizleme/ }).waitFor();
+        const close = page.getByRole("button", { name: "Önizlemeyi kapat", exact: true });
+        await close.waitFor();
+        const enabled = await page.evaluate(() => navigator.pdfViewerEnabled);
+        let frameSource: string | null = null;
+        if (enabled) {
+            const frame = page.locator('[data-happy-desktop-ui="file-preview-document"][title="qa-support.pdf"]');
+            await frame.waitFor();
+            frameSource = await frame.getAttribute("src");
+            assert.ok(frameSource);
+        } else {
+            await page.getByRole("button", { name: "İndir", exact: true }).first().waitFor();
+        }
+        assert.equal(await page.getByRole("textbox").first().isVisible(), true, "Chat composer remains visible");
+        assert.equal(await page.getByText("Üçgenin iç açıları toplamı 180 derecedir.", { exact: false }).first().isVisible(), true, "Main conversation remains visible");
+        await gymElectronInvisibleAssert(app);
+        const png = await app.evaluate(async ({ BrowserWindow }: any) => (await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true })).toPNG().toString("base64"));
+        await writeFile(resolve(".context/cyberfi-115-integrated-chat-pdf-right.png"), Buffer.from(png, "base64"));
+        await close.click();
+        return { rightPreviewTab: true, chatAndComposerVisible: true, nativePdfViewerEnabled: enabled, frameSourcePresent: Boolean(frameSource), readablePageVisuallyVerified: false };
+    });
     await run("presented diagram reaches shared Outputs via app subscription", async () => {
         await page.getByRole("button", { name: "Çıktılar", exact: true }).first().click();
         await page.getByRole("searchbox", { name: "Çıktılarda ara" }).fill("qa-diagram");
@@ -552,6 +575,7 @@ try {
     });
     await run("PNG and PDF open while Office offers honest file download", async () => {
         const open = async (name: string) => {
+            await page.getByRole("button", { name: "Çıktılar", exact: true }).first().click();
             await page.getByRole("searchbox", { name: "Çıktılarda ara" }).fill(name);
             await page.locator('[data-happy-desktop-ui="happy-agent-artifact-row"]').filter({ hasText: name }).first().click();
         };
@@ -562,6 +586,13 @@ try {
             await writeFile(resolve(`.context/cyberfi-115-integrated-output-${name}.png`), Buffer.from(png, "base64"));
         };
         await open("qa-support.png");
+        const historyToggle = page.getByRole("button", { name: "Geçmiş", exact: true });
+        await historyToggle.waitFor();
+        await page.getByRole("button", { name: "Kenar çubuğuna ekle", exact: true }).waitFor();
+        await page.getByRole("button", { name: "Kaldır", exact: true }).waitFor();
+        await historyToggle.click();
+        await page.getByRole("heading", { name: "Sürümler", exact: true }).waitFor();
+        await historyToggle.click();
         await page.waitForFunction(() => Array.from(document.images).some(image => image.naturalWidth === 400 && image.naturalHeight === 220 && image.closest('[data-happy-desktop-ui="happy-agent-artifact-viewer"]')));
         await open("qa-support.pdf");
         const pdf = page.locator('iframe[data-happy-desktop-ui="happy-agent-artifact-document"]').first();
@@ -588,7 +619,7 @@ try {
         assert.ok((await officeCard.innerText()).includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
         await officeCard.getByRole("button", { name: "İndir", exact: true }).waitFor();
         await captureOutput("docx");
-        report.outputPreviewEvidence = { png400x220: true, pdf: { ...pdfEvidence, readablePageVisuallyVerified: false, screenshot: "cyberfi-115-integrated-output-pdf.png" }, officeDownloadOffered: true, officeEditingTested: false, officeScreenshot: "cyberfi-115-integrated-output-docx.png" };
+        report.outputPreviewEvidence = { artifactToolbarTurkish: true, png400x220: true, pdf: { ...pdfEvidence, readablePageVisuallyVerified: false, screenshot: "cyberfi-115-integrated-output-pdf.png" }, officeDownloadOffered: true, officeEditingTested: false, officeScreenshot: "cyberfi-115-integrated-output-docx.png" };
         return report.outputPreviewEvidence;
     });
     report.limits = ["Model response is deterministic test provider; no live vendor/model called."];
