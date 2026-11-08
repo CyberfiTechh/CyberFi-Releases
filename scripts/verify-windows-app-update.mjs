@@ -23,12 +23,15 @@ assert(executable.startsWith(root + sep));
 const fromVersion = process.env.ACCEPTANCE_SOURCE_VERSION;
 const toVersion = process.env.ACCEPTANCE_TARGET_VERSION;
 const targetSize = Number(process.env.ACCEPTANCE_TARGET_SIZE);
-const rollback = fromVersion === "0.0.120" && toVersion === "0.0.118";
-assert(rollback || (fromVersion === "0.0.116" && toVersion === "0.0.117"), "Only the two pinned GUI scenarios are allowed");
-assert.equal(process.env.ACCEPTANCE_TARGET_SHA256, rollback
-    ? "5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381"
-    : "25b07164a17e77516f9dcfc978f784510e47a2af86fdf3e7dfa539322bdaa1f4");
-assert.equal(targetSize, rollback ? 143681400 : 143680592);
+const scenario = {
+    "0.0.116:0.0.117": ["25b07164a17e77516f9dcfc978f784510e47a2af86fdf3e7dfa539322bdaa1f4", 143680592],
+    "0.0.120:0.0.118": ["5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381", 143681400],
+    "0.0.121:0.0.120": ["3946c0f512ebe8f1cce8017c80734dfa2aa5d587898bb5bd2e5f550f786735e8", 143764088],
+}[`${fromVersion}:${toVersion}`];
+assert(scenario, "Only the three pinned GUI scenarios are allowed");
+const rollback = fromVersion !== "0.0.116";
+assert.equal(process.env.ACCEPTANCE_TARGET_SHA256, scenario[0]);
+assert.equal(targetSize, scenario[1]);
 const installerName = `CyberFi-${toVersion}-x64.exe`;
 const report = { success: false, mode: `actual signed${fromVersion} GUI installer to${toVersion}`, rollback,
     forwardUpgradeTested: false, phase: "capability", progress: [], processes: [], errors: [] };
@@ -239,7 +242,11 @@ try {
                 try {
                     const update = await page.evaluate(async () => {
                         const data = (await window.happyDesktop.runtimeGet()).update;
-                        return { status: data.status, availableVersion: data.availableVersion, downloadedFraction: data.downloadedFraction, message: data.message };
+                        const bar = document.querySelector('[role="progressbar"][aria-label="Masaüstü indirmesi"], [role="progressbar"][aria-label="Desktop download"]');
+                        const visible = !!bar?.getClientRects().length && getComputedStyle(bar).visibility !== "hidden";
+                        return { status: data.status, availableVersion: data.availableVersion, downloadedFraction: data.downloadedFraction, message: data.message,
+                            domPercent: visible ? Number(bar.getAttribute("aria-valuenow")) : null,
+                            domProgressText: visible ? bar.parentElement?.innerText : null };
                     });
                     if (JSON.stringify(report.progress.at(-1)) !== JSON.stringify(update)) report.progress.push(update);
                 } catch { /* Expected renderer closure on real updater handoff. */ }
@@ -278,6 +285,12 @@ try {
     const fractions = report.progress.filter(update => typeof update.downloadedFraction === "number").map(update => update.downloadedFraction);
     assert(fractions.length > 0 && fractions.every(value => Number.isFinite(value) && value >= 0 && value <= 1) && fractions.some(value => value > 0),
         "At least one finite actual download percentage in0..100 is required");
+    const domPercents = report.progress.filter(update => update.domPercent !== null && update.domPercent !== undefined);
+    assert(domPercents.length > 0 && domPercents.every((update, index) => Number.isFinite(update.domPercent) && update.domPercent >= 0 && update.domPercent <= 100
+        && (index === 0 || update.domPercent >= domPercents[index - 1].domPercent))
+        && domPercents.some(update => update.domPercent > 0 && /%\s*\d|\d\s*%/.test(update.domProgressText ?? "")),
+        "An actual visible DOM progress percentage above zero is required; runtime-only progress is insufficient");
+    report.actualDomProgressVerified = true;
     report.ownInstaller = installer;
     report.appDownloadedSHA256 = process.env.ACCEPTANCE_TARGET_SHA256;
     report.appDownloadedSize = bytes.size;

@@ -12,9 +12,13 @@ on:
                 type: boolean
                 default: false
                 description: Actual signed120 GUI download and automatic reopen of published118 (rollback, not forward upgrade)
+            in_app_rollback_121:
+                type: boolean
+                default: false
+                description: Actual signed121 GUI download and automatic reopen of published120 (rollback, not forward upgrade)
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120"]
+                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121"]
                 default: "0.0.115"
             target_sha256:
                 type: string
@@ -31,9 +35,10 @@ jobs:
         env:
             IN_APP_UPDATE: ${{ inputs.in_app_update }}
             IN_APP_ROLLBACK_120: ${{ inputs.in_app_rollback_120 }}
+            IN_APP_ROLLBACK_121: ${{ inputs.in_app_rollback_121 }}
             TARGET_VERSION: ${{ inputs.target_version || '0.0.115' }}
             TARGET_SHA256: ${{ inputs.target_sha256 }}
-        timeout-minutes: ${{ (inputs.in_app_update || inputs.in_app_rollback_120) && 30 || 20 }}
+        timeout-minutes: ${{ (inputs.in_app_update || inputs.in_app_rollback_120 || inputs.in_app_rollback_121) && 30 || 20 }}
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
               with:
@@ -56,7 +61,7 @@ jobs:
               working-directory: upstream
               run: pnpm install --frozen-lockfile --ignore-scripts
             - name: Install mandatory video encoder from the locked public gym dependency
-              if: inputs.in_app_update || inputs.in_app_rollback_120
+              if: inputs.in_app_update || inputs.in_app_rollback_120 || inputs.in_app_rollback_121
               working-directory: upstream
               run: pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
             - name: Self-check the acceptance harness
@@ -65,12 +70,15 @@ jobs:
                   ./acceptance/scripts/verify-windows.ps1 -SelfCheck
                   ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -InApp117 -TargetVersion '0.0.117' -TargetSha256 '25b07164a17e77516f9dcfc978f784510e47a2af86fdf3e7dfa539322bdaa1f4'
                   ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -InApp120 -TargetVersion '0.0.118' -TargetSha256 '5e353ac0d3ed67db5fc2349998fd05ff70ac7aa6a1223d35aceff8593601b381'
+                  ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -InApp121 -TargetVersion '0.0.120' -TargetSha256 '3946c0f512ebe8f1cce8017c80734dfa2aa5d587898bb5bd2e5f550f786735e8'
+                  ./acceptance/scripts/verify-windows.ps1 -SelfCheck -Upgrade115 -TargetVersion '0.0.121' -TargetSha256 'caff2c0b37b14088e10daa29c268bf34da2de87d97b7d8bb85d1b62c9abc637a'
             - name: Install previous release and verify target automatic relaunch
               shell: pwsh
               run: |
                   $params = @{ Upgrade115 = $true; TargetVersion = $env:TARGET_VERSION; TargetSha256 = $env:TARGET_SHA256; UpstreamPath = "$env:GITHUB_WORKSPACE/upstream" }
                   if ($env:IN_APP_UPDATE -eq 'true') { $params.InApp117 = $true }
                   if ($env:IN_APP_ROLLBACK_120 -eq 'true') { $params.InApp120 = $true }
+                  if ($env:IN_APP_ROLLBACK_121 -eq 'true') { $params.InApp121 = $true }
                   ./acceptance/scripts/verify-windows.ps1 @params
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
