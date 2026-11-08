@@ -210,7 +210,22 @@ try {
     }, toVersion, { timeout: 15000 });
     report.selectedPublishedVersion = toVersion;
     const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/i });
-    await button.waitFor({ state: "visible", timeout: 15000 });
+    try { await button.waitFor({ state: "visible", timeout: 15000 }); }
+    catch (error) {
+        report.selectionUiFailure = { runtime: await page.evaluate(async () => (await window.happyDesktop.runtimeGet()).update),
+            selectedDomValue: await select.inputValue(), body: await page.locator("body").innerText() };
+        await page.screenshot({ path: join(evidence, "selection-ui-before-navigation.png") });
+        const account = page.getByRole("button", { name: /^(Account|Hesap)$/i }).first();
+        if (await account.isVisible().catch(() => false)) {
+            await account.click();
+            await general.click();
+            await select.waitFor({ state: "visible", timeout: 15000 });
+            report.routeRefreshDiagnostic = { runtime: await page.evaluate(async () => (await window.happyDesktop.runtimeGet()).update),
+                selectedDomValue: await select.inputValue(), installButtonVisible: await button.isVisible(),
+                body: await page.locator("body").innerText() };
+        }
+        throw error;
+    }
     await page.screenshot({ path: join(evidence, "before-real-download.png") });
     watch = Promise.all([
         (async () => {
