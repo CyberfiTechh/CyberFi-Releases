@@ -423,6 +423,29 @@ async function main() {
             assert((await lstat(join(publicDist, path))).isFile());
         const publicContext = join(upstream, ".context");
         await mkdir(publicContext, { recursive: true });
+        const roleHarness = join(publicContext, "cyberfi-released-role-qa.mts");
+        const roleReport = join(publicContext, "cyberfi-released-role-qa-report.json");
+        await absent(roleHarness);
+        await cp(join(dirname(fileURLToPath(import.meta.url)), "released-role-harness.mts"), roleHarness);
+        try {
+            await command(process.execPath, ["--import", "tsx", roleHarness], {
+                cwd: upstream,
+                env: {
+                    ...env,
+                    HAPPY_DESKTOP_AGENT_EXECUTABLE: engine,
+                    CYBERFI_RELEASED_RESOURCES: resources,
+                    CYBERFI_ROLE_QA_BINARY_SHA256: await hashFile(engine),
+                    CYBERFI_ROLE_QA_REPORT: roleReport,
+                    CYBERFI_ROLE_QA_BATCH_SIZE: "8",
+                    CYBERFI_ROLE_QA_LIMIT: "490",
+                },
+                log: join(evidence, "native-role-harness.log"),
+            });
+        } finally {
+            if (await lstat(roleReport).catch(() => undefined)) await cp(roleReport, join(evidence, "native-role-read-qa-report.json"));
+        }
+        const roleProof = JSON.parse(await readFile(roleReport, "utf8"));
+        assert(roleProof.success === true && roleProof.exactReadCount === 490 && roleProof.childExact === true, "Native role-body and read-only child checks failed");
         const harness = join(publicContext, "cyberfi-115-integrated-qa.mts");
         await absent(harness);
         await cp(join(dirname(fileURLToPath(import.meta.url)), "released-ui-harness.mts"), harness);
@@ -458,6 +481,7 @@ async function main() {
                     platform: "darwin",
                     arch,
                     packagedBoot: smoke,
+                    nativeRoleAccess: { exactRoleBodies: roleProof.exactReadCount, realReadOnlyChild: roleProof.childExact, binarySha256: roleProof.binarySha256 },
                     compiledArtifactUi: {
                         checks: report.checks,
                         stockElectronVersion: ELECTRON_VERSION,
