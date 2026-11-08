@@ -149,8 +149,10 @@ try {
         },
         timeout: 60000,
     });
-    await app.evaluate(async ({ clipboard, ClipboardItem }: any) => {
-        const items = await clipboard.read();
+    report.clipboardBackup = await app.evaluate(async ({ clipboard, ClipboardItem }: any) => {
+        const readItems = await clipboard.read();
+        // macOS may return a zero-MIME placeholder for an empty clipboard.
+        const items = readItems.filter((item: any) => item.types.length > 0);
         (globalThis as any).__cyberfiQaClipboard = await Promise.all(
             items.map(
                 async (item: any) =>
@@ -166,6 +168,7 @@ try {
                     ),
             ),
         );
+        return { preservedItems: items.length, emptyPlaceholders: readItems.length - items.length };
     });
     clipboardBefore = true;
     const page = await app.firstWindow();
