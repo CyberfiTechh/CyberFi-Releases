@@ -64,9 +64,19 @@ jobs:
                   echo "ACCEPTANCE_ROOT=$root" >> "$GITHUB_ENV"
                   echo "DMG_ROOT=$downloads" >> "$GITHUB_ENV"
                   for version in "$OLD_VERSION" "$TARGET_VERSION"; do
-                    curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
-                      "https://github.com/CyberfiTechh/CyberFi-Releases/releases/download/macos-v$version/CyberFi-$version-$ARCH.dmg" \
-                      --output "$downloads/CyberFi-$version-$ARCH.dmg"
+                    name="CyberFi-$version-$ARCH.dmg"
+                    if ! curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
+                      "https://github.com/CyberfiTechh/CyberFi-Releases/releases/download/macos-v$version/$name" \
+                      --output "$downloads/$name"; then
+                      asset_id="$(curl --fail --retry 2 --connect-timeout 20 --max-time 60 \
+                        "https://api.github.com/repos/CyberfiTechh/CyberFi-Releases/releases/tags/macos-v$version" \
+                        | jq -er --arg name "$name" '[.assets[] | select(.name == $name and .state == "uploaded")] | if length == 1 then .[0].id else error("Expected one exact published DMG") end')"
+                      [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
+                      curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
+                        --header 'Accept: application/octet-stream' \
+                        "https://api.github.com/repos/CyberfiTechh/CyberFi-Releases/releases/assets/$asset_id" \
+                        --output "$downloads/$name"
+                    fi
                   done
             - name: Verify manual replacement, retained profile and fresh 115 launch
               working-directory: upstream
