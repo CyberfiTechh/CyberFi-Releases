@@ -1,67 +1,25 @@
 name: Verify CyberAI published native automatic update
-run-name: CyberAI public126 automatic update ${{ inputs.target }}
-on:
-    workflow_dispatch:
-        inputs:
-            target:
-                type: choice
-                options: [windows, macos-x64, macos-arm64]
-                required: true
+run-name: CyberFi127 Windows launcher token selftest
+on: workflow_dispatch
 permissions:
-    contents: read
+  contents: read
 jobs:
-    native:
-        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
-        permissions:
-            contents: read # Both pinned source and target must already be public.
-        runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-15' || 'macos-15-intel' }}
-        timeout-minutes: 35
-        steps:
-            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-              with:
-                  path: acceptance
-                  persist-credentials: false
-            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-              with:
-                  repository: slopus/happy-desktop
-                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
-                  path: upstream
-                  persist-credentials: false
-            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
-              with:
-                  version: 10.28.1
-            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-              with:
-                  node-version: "24"
-                  package-manager-cache: false
-            - name: Install existing hidden launcher and recording dependencies
-              working-directory: upstream
-              shell: bash
-              run: |
-                  pnpm install --frozen-lockfile --ignore-scripts
-                  pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
-            - name: Verify real GUI download, install, automatic reopen and protected login
-              working-directory: upstream
-              shell: bash
-              env:
-                  TARGET: ${{ inputs.target }}
-                  ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
-                  ACCEPTANCE_SOURCE_SHA: 357ec9398a646c3f2853437f1adf285e2a961a4f
-                  GH_TOKEN: ${{ github.token }}
-                  CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI125_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
-                  CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI125_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
-              run: |
-                  if [[ "$TARGET" == "windows" ]]; then
-                    node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-cyberai-windows-update.mjs" "$GITHUB_WORKSPACE/upstream"
-                  else
-                    node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-cyberai-macos-update.mjs" "$GITHUB_WORKSPACE/upstream"
-                  fi
-            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              if: always()
-              with:
-                  name: CyberAI-automatic-update-${{ inputs.target }}
-                  path: |
-                      ${{ runner.temp }}/cyberfi-windows-auth-update/evidence
-                      ${{ runner.temp }}/cyberfi-macos-app-update/evidence
-                  retention-days: 7
-                  include-hidden-files: false
+  token:
+    if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.ref == 'refs/heads/codex/windows-launch127-preflight'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Verify same-user non-elevated token and environment without GUI
+        shell: pwsh
+        run: |
+          & ./scripts/windows-owned-launch.ps1 -SelfTest | Tee-Object -FilePath "$env:RUNNER_TEMP/owned-launch-selftest.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Native token preflight failed' }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: CyberFi127-Windows-owned-launch-preflight
+          path: ${{ runner.temp }}/owned-launch-selftest.json
+          retention-days: 7
