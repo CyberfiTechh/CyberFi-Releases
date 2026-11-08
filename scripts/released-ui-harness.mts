@@ -616,11 +616,12 @@ try {
     await run("sidebar reaches complete490roles and300skills from actual UI", async () => {
         const started = Date.now();
         const readCounts = async () => page.evaluate(() => {
-            const read = (id: string) => {
-                const row = document.querySelector(`[data-happy-desktop-ui="sidebar-item"][data-item-id="${id}"]`);
-                return {label: row?.textContent ?? "", count: Number(row?.querySelector('[data-happy-desktop-ui="count-badge-label"]')?.textContent ?? "0")};
+            const agents = document.querySelector('[data-happy-desktop-ui="sidebar-item"][data-item-id="agents"]');
+            const skills = document.querySelector('[data-happy-desktop-ui="sidebar-item"][data-item-id="skills"]');
+            return {
+                agents: {label: agents?.textContent ?? "", count: Number(agents?.querySelector('[data-happy-desktop-ui="count-badge-label"]')?.textContent ?? "0")},
+                skills: {label: skills?.textContent ?? "", count: Number(skills?.querySelector('[data-happy-desktop-ui="count-badge-label"]')?.textContent ?? "0")},
             };
-            return {agents: read("agents"), skills: read("skills")};
         });
         const initial = await readCounts();
         let final = initial;
