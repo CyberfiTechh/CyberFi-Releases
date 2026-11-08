@@ -30,7 +30,7 @@ function desktopVersion(value) {
 const UPSTREAM_COMMIT = "c9feffb54cdb3591220dafced4070e118e3d297a";
 const ELECTRON_VERSION = "45.0.0";
 function engineTagAllowed(value) {
-    assert(["v0.4.116", "v0.4.117-preview.1"].includes(value));
+    assert(["v0.4.116", "v0.4.117-preview.1", "v0.4.118"].includes(value));
     return value;
 }
 function identifier(value) {
@@ -247,6 +247,8 @@ function selfTest() {
     assertVersionOutput("Happy Agent 0.4.116\n", "0.4.116");
     assertVersionOutput("Happy Agent 0.4.117-preview.1", "0.4.117-preview.1");
     assert.equal(engineTagAllowed("v0.4.117-preview.1"), "v0.4.117-preview.1");
+    assert.equal(engineTagAllowed("v0.4.118"), "v0.4.118");
+    assertVersionOutput("Happy Agent 0.4.118", "0.4.118");
     assert.throws(() => engineTagAllowed("v0.4.117"));
     assert.throws(() => engineTagAllowed("v0.4.117-preview.2"));
     assert.throws(() => assertVersionOutput("Happy Agent 0.4.116", "0.4.117"));
