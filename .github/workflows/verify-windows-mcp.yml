@@ -48,16 +48,28 @@ jobs:
             - name: Self-check pinned release guards
               shell: pwsh
               run: ./acceptance/scripts/verify-windows.ps1 -SelfCheck
+            - name: Self-check read-only Python diagnostics
+              shell: pwsh
+              run: ./acceptance/scripts/diagnose-windows-python.ps1 -SelfCheck
+            - name: Probe pinned UV and Python in a separate temporary directory
+              shell: pwsh
+              run: ./acceptance/scripts/diagnose-windows-python.ps1 -Phase preflight
             - name: Verify signed target payload and run nine production MCP calls
+              id: mcp
               env:
                   GH_TOKEN: ${{ github.token }}
               shell: pwsh
               run: ./acceptance/scripts/verify-windows.ps1 -Mcp115 -TargetVersion "$env:TARGET_VERSION" -TargetSha256 "$env:TARGET_SHA256" -UpstreamPath "$env:GITHUB_WORKSPACE/upstream"
+            - name: Preserve failed runtime cache evidence and probe dependencies separately
+              if: failure() && steps.mcp.outcome == 'failure'
+              shell: pwsh
+              run: ./acceptance/scripts/diagnose-windows-python.ps1 -Phase failure
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
                   name: CyberFi-Windows-MCP-${{ inputs.target_version }}
                   path: |
+                      ${{ runner.temp }}/cyberfi-python-diagnostics/*.json
                       ${{ runner.temp }}/cyberfi-windows-mcp-*/evidence
                       ${{ runner.temp }}/cyberfi-windows-mcp-*/mcp-acceptance.json
                       ${{ runner.temp }}/cyberfi-windows-mcp-*/normal-caller-precondition.json
