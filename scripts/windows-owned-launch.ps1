@@ -16,12 +16,14 @@ $report = [ordered]@{
     environmentPreserved = $false
     exitCodePropagated = $false
     guiLaunched = $false
+    probeStarted = $false
     accountRemoved = $false
     fixtureRemoved = $false
 }
 $fixture = $null
 $account = $null
 $accountAttempted = $false
+$nativeAttempted = $false
 $password = $null
 
 function Get-LocalAccountsFailure([Management.Automation.ErrorRecord]$Record) {
@@ -72,6 +74,7 @@ try {
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Principal;
@@ -79,6 +82,10 @@ using System.Text;
 
 public static class CyberFiStandardLaunch {
     public static string Stage = "initialize";
+    public static bool TokenVerified, ImageVerified, ErrorModeRestored;
+    public static uint? ResumeResult, WaitResult, ObservedExitCode, CleanupWaitResult;
+    public static long? WaitElapsedMs;
+    public static bool? TerminateSucceeded;
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct StartupInfo {
         public int size; public string reserved, desktop, title;
@@ -103,6 +110,8 @@ public static class CyberFiStandardLaunch {
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetExitCodeProcess(IntPtr process, out uint code);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll")] static extern bool TerminateProcess(IntPtr process, uint code);
+    [DllImport("kernel32.dll")] static extern uint GetErrorMode();
+    [DllImport("kernel32.dll")] static extern uint SetErrorMode(uint mode);
 
     static void Check(bool ok) {
         if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -170,30 +179,51 @@ public static class CyberFiStandardLaunch {
                 Stage = "create-suspended-standard-user-probe";
                 // The hosted runner experiment succeeded with logon flags zero and an unnamed desktop.
                 const uint flags = 4 | 0x400 | 0x08000000; // Suspended, Unicode environment, no console window.
-                Check(CreateProcessWithLogonW(user, ".", nativePassword, 0, executable, command, flags,
-                    environment, cwd, ref startup, out child));
+                const uint suppressErrorDialogs = 0x1 | 0x2;
+                uint previousErrorMode = SetErrorMode(GetErrorMode() | suppressErrorDialogs);
+                try {
+                    Check(CreateProcessWithLogonW(user, ".", nativePassword, 0, executable, command, flags,
+                        environment, cwd, ref startup, out child));
+                } finally {
+                    SetErrorMode(previousErrorMode);
+                    ErrorModeRestored = GetErrorMode() == previousErrorMode;
+                }
             } finally { Marshal.ZeroFreeGlobalAllocUnicode(nativePassword); }
 
             Stage = "verify-suspended-probe";
             Check(OpenProcessToken(child.process, 10, out token));
             VerifyStandardUser(token, sid);
+            TokenVerified = true;
             var image = new StringBuilder(32768);
             int length = image.Capacity;
             Check(QueryFullProcessImageNameW(child.process, 0, image, ref length));
             if (!String.Equals(image.ToString(), executable, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("unexpected-probe-image");
+            ImageVerified = true;
+            if (!ErrorModeRestored) throw new InvalidOperationException("wrapper-error-mode-not-restored");
 
-            Stage = "run-verified-probe";
-            if (ResumeThread(child.thread) != 1) throw new Win32Exception(Marshal.GetLastWin32Error());
-            if (WaitForSingleObject(child.process, 30000) != 0) throw new InvalidOperationException("probe-wait-failed");
-            exited = true;
+            Stage = "resume-verified-probe";
+            ResumeResult = ResumeThread(child.thread);
+            if (ResumeResult == UInt32.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (ResumeResult != 1) throw new InvalidOperationException("unexpected-probe-suspend-count");
+
+            Stage = "wait-for-verified-probe";
+            var timer = Stopwatch.StartNew();
+            WaitResult = WaitForSingleObject(child.process, 30000);
+            int waitError = WaitResult == UInt32.MaxValue ? Marshal.GetLastWin32Error() : 0;
+            WaitElapsedMs = timer.ElapsedMilliseconds;
             uint exitCode;
-            Check(GetExitCodeProcess(child.process, out exitCode));
+            bool observedExit = GetExitCodeProcess(child.process, out exitCode);
+            if (observedExit) ObservedExitCode = exitCode;
+            if (WaitResult == UInt32.MaxValue) throw new Win32Exception(waitError);
+            if (WaitResult != 0) throw new InvalidOperationException("probe-wait-failed");
+            exited = true;
+            Check(observedExit);
             return exitCode;
         } finally {
             if (child.process != IntPtr.Zero && !exited) {
-                TerminateProcess(child.process, 1);
-                WaitForSingleObject(child.process, 5000);
+                if (WaitForSingleObject(child.process, 0) != 0) TerminateSucceeded = TerminateProcess(child.process, 1);
+                CleanupWaitResult = WaitForSingleObject(child.process, 5000);
             }
             if (token != IntPtr.Zero) CloseHandle(token);
             if (child.thread != IntPtr.Zero) CloseHandle(child.thread);
@@ -238,9 +268,11 @@ public static class CyberFiStandardLaunch {
     $acl.AddAccessRule($rule)
     Set-Acl -LiteralPath $fixture.FullName -AclObject $acl
     $probe = Join-Path $fixture.FullName 'probe.ps1'
+    $started = Join-Path $fixture.FullName 'started.flag'
     $receipt = Join-Path $fixture.FullName 'result.json'
     $probeSource = @'
 $ErrorActionPreference = 'Stop'
+[IO.File]::WriteAllText([IO.Path]::Combine($PSScriptRoot, 'started.flag'), '1')
 $expected = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('VMO8cmvDp2UgZGXEn2VyaTsgJVBBVEglICYgImFsxLFudMSxIgp5ZW5pIHNhdMSxcg=='))
 $preserved = [Environment]::GetEnvironmentVariable('CYBERFI_OWNED_LAUNCH_PROBE') -ceq $expected
 $sidMatches = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ceq $env:CYBERFI_OWNED_LAUNCH_SID
@@ -270,6 +302,7 @@ exit 23
     $report.stage = 'normalize-probe-environment'
     $nativeEnvironment = ConvertTo-NativeEnvironment $environment
     $report.stage = 'native-launch'
+    $nativeAttempted = $true
     $report.childExitCode = [CyberFiStandardLaunch]::Run($account.Name, $password, $accountSid.Value, $nativePowerShell, $probe, $fixture.FullName, $nativeEnvironment)
     $report.fixtureSidVerified = $true
     $report.elevated = $false
@@ -299,6 +332,24 @@ exit 23
         if ($cause -is [ComponentModel.Win32Exception]) { $report.nativeError = $cause.NativeErrorCode; break }
     }
 } finally {
+    if ($nativeAttempted) {
+        $report.fixtureSidVerified = [CyberFiStandardLaunch]::TokenVerified
+        if ($report.fixtureSidVerified) {
+            $report.elevated = $false
+            $report.administrator = $false
+            $report.mediumIntegrity = $true
+        }
+        $report.imageVerified = [CyberFiStandardLaunch]::ImageVerified
+        $report.errorModeRestored = [CyberFiStandardLaunch]::ErrorModeRestored
+        $report.resumeResult = [CyberFiStandardLaunch]::ResumeResult
+        $report.waitResult = [CyberFiStandardLaunch]::WaitResult
+        $report.waitElapsedMs = [CyberFiStandardLaunch]::WaitElapsedMs
+        $report.observedExitCode = [CyberFiStandardLaunch]::ObservedExitCode
+        $report.terminateSucceeded = [CyberFiStandardLaunch]::TerminateSucceeded
+        $report.cleanupWaitResult = [CyberFiStandardLaunch]::CleanupWaitResult
+        $report.probeStarted = [IO.File]::Exists($started)
+        $report.receiptExists = [IO.File]::Exists($receipt)
+    }
     if ($accountAttempted) {
         try {
             $candidate = Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue
@@ -318,7 +369,7 @@ exit 23
         try {
             $directory = Get-Item -LiteralPath $fixture.FullName -Force
             if (($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Fixture became a reparse point.' }
-            foreach ($name in 'probe.ps1', 'result.json') {
+            foreach ($name in 'probe.ps1', 'started.flag', 'result.json') {
                 $path = Join-Path $directory.FullName $name
                 $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
                 if ($item) {
@@ -326,6 +377,7 @@ exit 23
                     [IO.File]::Delete($path)
                 }
             }
+            $report.remainingFixtureEntries = @(Get-ChildItem -LiteralPath $directory.FullName -Force | Select-Object -First 32).Count
             [IO.Directory]::Delete($directory.FullName, $false)
             $report.fixtureRemoved = $true
         } catch { $report.fixtureRemoved = $false }
