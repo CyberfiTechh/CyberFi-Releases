@@ -69,6 +69,11 @@ jobs:
             - name: Install only public upstream verification dependencies
               working-directory: public-upstream
               run: pnpm install --frozen-lockfile --ignore-scripts
+            - name: Install mandatory native video encoder from the locked public gym dependency
+              working-directory: public-upstream
+              run: |
+                  unset GH_TOKEN GITHUB_TOKEN
+                  pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
             - name: Verify exact released artifacts and run isolated native checks
               run: node verifier/scripts/verify-released-ui.mjs "$GITHUB_WORKSPACE/public-upstream" "$RUNNER_TEMP/cyberfi-released-ui"
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

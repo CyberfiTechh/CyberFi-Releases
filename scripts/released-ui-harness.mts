@@ -2,7 +2,8 @@ import { happyAgentClientCreate } from "../packages/happy-desktop-gym/sources/el
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, writeFile, readFile, cp } from "node:fs/promises";
+import { mkdir, writeFile, readFile, cp, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { extname, join, resolve } from "node:path";
 import {
@@ -49,6 +50,11 @@ const server = createServer((req, res) => {
     });
 });
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+// macOS exposes /var as an alias of /private/var. Record the real temporary
+// directory before creating the isolated workspace; production path guards stay intact.
+const canonicalTemporaryDirectory = await realpath(tmpdir());
+process.env.TMPDIR = canonicalTemporaryDirectory;
+report.canonicalTemporaryDirectory = canonicalTemporaryDirectory;
 const { paths } = await gymRunPathsCreate("smoke");
 const inferenceBase = gymInferenceServerCreate(gymManifestRead("smoke"), paths.inferenceLog);
 await inferenceBase.start();
