@@ -3,7 +3,7 @@ import { createHash, verify, randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, realpath, writeFile, lstat, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -82,7 +82,16 @@ async function main() {
     await Promise.all([evidence, profile, applications].map(path => mkdir(path)));
     const report = { success: false, platform: target, version: VERSION, sourceCommit: SOURCE_COMMIT, sourceCommitEvidence: "reviewed-build-provenance", artifact: pins, checks: {}, videos: [], errors: [], limits: ["Packaged app does not embed source attestation; source commit is bound through reviewed build provenance and exact independently RSA-verified asset pins.", "CI does not certify browser-download Gatekeeper trust.", "macOS hidden startup may transiently have a regular Dock activation policy; only no onscreen window and no focus are certified here."] };
     const save = () => writeFile(join(evidence, "cyberai-login.json"), JSON.stringify(report, null, 2) + "\n");
-    const command = async (file, args, options = {}) => (await exec(file, args, { env: safeEnv, timeout: 120000, windowsHide: true, maxBuffer: 8 * 1024 ** 2, ...options })).stdout.trim();
+    const command = async (file, args, options = {}) => {
+        try { return (await exec(file, args, { env: safeEnv, timeout: 120000, windowsHide: true, maxBuffer: 8 * 1024 ** 2, ...options })).stdout.trim(); }
+        catch (error) {
+            // Never retain arbitrary stderr, command arguments, HTTP bodies or headers.
+            const text = typeof error.stderr === "string" ? error.stderr : "";
+            error.cyberaiCommand = { tool: basename(file), verb: ["default-keychain", "list-keychains", "show-keychain-info", "create-keychain", "unlock-keychain", "set-keychain-settings", "start", "stop", "--version", "-tzf", "-xzf", "init", "-C"].includes(args[0]) ? args[0] : "native-operation", exitCode: Number.isSafeInteger(error.code) ? error.code : null,
+                noDefaultKeychain: /default keychain could not be found/iu.test(text), keychainNotFound: /specified keychain could not be found/iu.test(text), interactionNotAllowed: /interaction is not allowed/iu.test(text), permissionDenied: /permission denied|access is denied/iu.test(text), missingFile: /no such file|cannot find the file/iu.test(text) };
+            throw error;
+        }
+    };
     const ps = windows ? join(environmentValue(safeEnv, "SystemRoot"), "System32/WindowsPowerShell/v1.0/powershell.exe") : undefined;
     const powershell = script => command(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
     const quote = value => "'" + value.replaceAll("'", "''") + "'";
@@ -237,11 +246,15 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         assert(engineRelease.tag_name === "v0.4.118" && !engineRelease.draft);
         const engineAsset = engineRelease.assets.find(item => item.id === engineId); assert.equal(engineAsset?.digest, "sha256:" + engineSha);
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
+        stage = "owned engine archive download";
         await download("CyberfiTechh/CyberFi-Engine", engineAsset, archive); assert.equal(await hashFile(archive), engineSha);
         const tar = windows ? "tar.exe" : "/usr/bin/tar";
+        stage = "owned engine archive extraction";
         assert.equal(await command(tar, ["-tzf", archive]), engineName); await command(tar, ["-xzf", archive, "-C", engineRoot]);
         const engine = join(engineRoot, engineName); process.env.HAPPY_DESKTOP_AGENT_EXECUTABLE = engine;
+        stage = "owned engine version verification";
         assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.118");
+        stage = "upstream gym import and isolated paths";
         const gym = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
         const { gymElectronProcessRun, gymElectronVideoRecord } = await import(gym("launch"));
         const { gymRunPathsCreate } = await import(gym("paths"));
@@ -263,12 +276,24 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             stage = "native Keychain environment preflight";
             const security = (args, env) => command("/usr/bin/security", args, { env, timeout: 30000 });
             const keychains = output => output.split(/\r?\n/u).map(line => line.trim()).filter(Boolean).map(line => { const value = JSON.parse(line); assert(typeof value === "string" && value.startsWith("/") && !value.includes("\n")); return value; });
-            const originalDefault = keychains(await security(["default-keychain", "-d", "user"], engineEnv));
-            const originalList = keychains(await security(["list-keychains", "-d", "user"], engineEnv));
-            const actualDefault = keychains(await security(["default-keychain", "-d", "user"], safeEnv));
+            report.keychainPreflight = { runnerHome: safeEnv.HOME, ownedHome: engineEnv.HOME, cfFixedUserHomePresent: !!safeEnv.CFFIXED_USER_HOME, reads: [] };
+            let keychainReadError;
+            const securityRead = async (verb, env, context) => {
+                assert(["default-keychain", "list-keychains"].includes(verb));
+                try { const output = await security([verb, "-d", "user"], env); report.keychainPreflight.reads.push({ context, verb, success: true, output: output.slice(0, 4096) }); return output; }
+                catch (error) {
+                    // These two official read-only metadata commands contain no secrets.
+                    report.keychainPreflight.reads.push({ context, verb, success: false, exitCode: Number.isSafeInteger(error.code) ? error.code : null, output: String(error.stdout ?? "").slice(0, 4096), diagnostic: String(error.stderr ?? "").slice(0, 4096) });
+                    keychainReadError ??= error; return "";
+                }
+            };
+            const actualDefault = keychains(await securityRead("default-keychain", safeEnv, "runner-home"));
+            const originalDefault = keychains(await securityRead("default-keychain", engineEnv, "owned-home"));
+            const originalList = keychains(await securityRead("list-keychains", engineEnv, "owned-home"));
+            Object.assign(report.keychainPreflight, { runnerDefault: actualDefault[0], ownedHomeDefault: originalDefault[0], searchListCount: originalList.length });
+            if (keychainReadError) throw keychainReadError;
             assert(originalDefault.length === 1 && actualDefault.length === 1 && originalList.length <= 20, "Native user keychain baseline missing");
             const keychain = join(root, "owned-login.keychain-db"), keychainPassword = randomBytes(32).toString("hex");
-            report.keychainPreflight = { runnerDefault: actualDefault[0], ownedHomeDefault: originalDefault[0], searchListCount: originalList.length, runnerHome: safeEnv.HOME, ownedHome: engineEnv.HOME, cfFixedUserHomePresent: !!safeEnv.CFFIXED_USER_HOME };
             report.keychainPreflight.defaultMetadataReadable = await security(["show-keychain-info", originalDefault[0]], engineEnv).then(() => true, () => false);
             keychainCleanup = async () => {
                 await security(["default-keychain", "-d", "user", "-s", originalDefault[0]], engineEnv);
@@ -290,22 +315,30 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         for (const name of [".config", ".cache", ".local/share", ".local/state", "AppData/Local", "AppData/Roaming"]) await mkdir(join(paths.home, name), { recursive: true });
         await writeFile(join(config, "happy.toml"), '[settings]\nhappy_integration = false\nmenu_bar = false\n\n[providers.codex]\ntype = "codex"\nenabled = true\ncredential_isolation = true\n');
         const stop = () => command(engine, ["stop"], { cwd: paths.root, env: engineEnv }).catch(() => undefined);
+        stage = "owned engine daemon startup";
         runtime = { stop }; await command(engine, ["start"], { cwd: paths.root, env: engineEnv });
+        stage = "owned engine authenticated health";
         let client; const healthDeadline = Date.now() + 30000;
         while (Date.now() < healthDeadline) {
             try { client = happyAgentClientCreate(paths.socketPath, (await readFile(paths.tokenPath, "utf8")).trim()); await client.getHealth(); break; } catch { client = undefined; await delay(150); }
         }
-        assert(client, "Fixture engine health unavailable");
+        assert(client, "Fixture engine health unavailable"); stage = "synthetic workspace chat fixture";
         const fixtureClient = new GymHappyAgentClient(paths.socketPath, (await readFile(paths.tokenPath, "utf8")).trim());
         const repository = join(paths.projects, "native-login-chat"); await mkdir(repository);
         const gitEnv = { ...systemEnv, ...gymHostEnvironment(paths), GIT_CONFIG_GLOBAL: windows ? "NUL" : "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+        stage = "fixture Git repository initialization";
         await command("git", ["init", "--initial-branch=main", repository], { env: gitEnv });
         await writeFile(join(repository, "README.md"), "# Disposable native login acceptance\n");
         await command("git", ["-C", repository, "add", "README.md"], { env: gitEnv });
         await command("git", ["-C", repository, "-c", "user.name=CyberAI CI", "-c", "user.email=ci@example.invalid", "commit", "-m", "Owned fixture"], { env: gitEnv });
-        const { project } = await fixtureClient.registerProject(repository); await fixtureClient.waitForWorkspace(project.id, "ready", 90000);
+        stage = "fixture project registration";
+        const { project } = await fixtureClient.registerProject(repository);
+        stage = "fixture workspace readiness"; await fixtureClient.waitForWorkspace(project.id, "ready", 90000);
+        stage = "fixture agent creation";
         const { agent } = await fixtureClient.createAgent(project.id);
+        stage = "fixture local-only chat send";
         const turn = await fixtureClient.sendMessage(agent.id, "Confirm this synthetic native chat acceptance.");
+        stage = "fixture local-only chat completion";
         await fixtureClient.waitForAgentIdle(agent.id, turn.runId, 60000); assert(inferenceCalls > 0, "The local-only inference fixture was not exercised");
         const configDir = join(profile, "desktop"); await mkdir(configDir);
         await writeFile(join(configDir, "local-onboarding.json"), JSON.stringify({ version: 3, chiefOfStaffSetup: true }));
@@ -446,6 +479,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         report.errors.push("Native acceptance failed during " + stage);
         report.failureKind = ["Error", "AssertionError", "TimeoutError", "TypeError"].includes(error?.name) ? error.name : "native-error";
         if (typeof error?.code === "string" && /^[A-Z_0-9]{1,64}$/u.test(error.code)) report.failureCode = error.code;
+        if (error?.cyberaiCommand) report.commandFailure = error.cyberaiCommand;
         if (page && !page.isClosed()) report.failureUi = await page.evaluate(() => {
             const login = document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"]');
             const text = login?.textContent ?? "";
