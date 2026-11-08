@@ -1,4 +1,4 @@
-param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [switch]$InApp120, [switch]$InApp121, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [switch]$InApp117, [switch]$InApp120, [switch]$InApp121, [ValidateSet("0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121", "0.0.122")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
@@ -17,8 +17,8 @@ if ($TargetVersion -eq '0.0.117') {
     Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '117 requires an explicit immutable published installer digest'
     Assert-True ($TargetSha256 -ceq $expected['0.0.117']) 'Published117 immutable digest changed'
 }
-if ($TargetVersion -in @('0.0.118','0.0.119','0.0.120','0.0.121')) {
-    Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '118/119/120/121 require an explicit immutable published installer digest'
+if ($TargetVersion -in @('0.0.118','0.0.119','0.0.120','0.0.121','0.0.122')) {
+    Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '118/119/120/121/122 require an explicit immutable published installer digest'
     if ($expected.ContainsKey($TargetVersion)) {
         Assert-True ($TargetSha256 -ceq $expected[$TargetVersion]) 'Published immutable digest changed'
     } else { $expected[$TargetVersion] = $TargetSha256 }
@@ -44,6 +44,7 @@ function Get-UpgradeSource([string]$Target) {
         '0.0.119' { '0.0.118' }
         '0.0.120' { '0.0.118' }
         '0.0.121' { '0.0.120' }
+        '0.0.122' { '0.0.121' }
         default { throw 'Unsupported upgrade target' }
     }
 }
@@ -80,12 +81,13 @@ if ($SelfCheck) {
     Assert-True ((Get-UpgradeSource '0.0.120') -eq '0.0.118') '120 source must remain the published118;119 is an unpublished candidate'
 
     Assert-True ((Get-UpgradeSource '0.0.121') -eq '0.0.120') '121 source must be the published120'
+    Assert-True ((Get-UpgradeSource '0.0.122') -eq '0.0.121') '122 source must be the published121'
     Assert-True ($expected.Count -in @(8, 9)) 'Only immutable pinned versions allowed'
     Assert-True ($expected.ContainsKey((Get-UpgradeSource $TargetVersion))) 'Upgrade baseline must have an immutable installer digest'
     Assert-True ($expected.ContainsKey('0.0.120') -and $expected.ContainsKey('0.0.118')) 'Current GUI rollback requires both immutable installer pins'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
-        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118', '0.0.119', '0.0.120', '0.0.121')) 'Unexpected version'
+        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117', '0.0.118', '0.0.119', '0.0.120', '0.0.121', '0.0.122')) 'Unexpected version'
     }
     Assert-True ($certificateThumbprint -cmatch '^[A-F0-9]{40}$') 'Invalid certificate pin'
     $null = Assert-Owned (Join-Path ([IO.Path]::GetTempPath()) 'owned/item') ([IO.Path]::GetTempPath())

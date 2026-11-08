@@ -18,7 +18,7 @@ on:
                 description: Actual signed121 GUI download and automatic reopen of published120 (rollback, not forward upgrade)
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121"]
+                options: ["0.0.115", "0.0.116", "0.0.117", "0.0.118", "0.0.119", "0.0.120", "0.0.121", "0.0.122"]
                 default: "0.0.115"
             target_sha256:
                 type: string
