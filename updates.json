@@ -1,5 +1,31 @@
 [
   {
+    "tag_name": "macos-v0.0.121",
+    "draft": false,
+    "assets": [
+      {
+        "id": 723659569,
+        "name": "CyberFi-0.0.121-arm64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 723667097,
+        "name": "CyberFi-0.0.121-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 723653495,
+        "name": "CyberFi-0.0.121-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 723659516,
+        "name": "CyberFi-0.0.121-x64.dmg.sha256",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "v0.0.121",
     "draft": false,
     "assets": [
@@ -25,16 +51,6 @@
     "draft": false,
     "assets": [
       {
-        "id": 723555636,
-        "name": "CyberFi-0.0.120-x64.dmg",
-        "state": "uploaded"
-      },
-      {
-        "id": 723561421,
-        "name": "CyberFi-0.0.120-x64.dmg.sha256",
-        "state": "uploaded"
-      },
-      {
         "id": 723561452,
         "name": "CyberFi-0.0.120-arm64.dmg",
         "state": "uploaded"
@@ -42,6 +58,16 @@
       {
         "id": 723567042,
         "name": "CyberFi-0.0.120-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 723555636,
+        "name": "CyberFi-0.0.120-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 723561421,
+        "name": "CyberFi-0.0.120-x64.dmg.sha256",
         "state": "uploaded"
       }
     ]
@@ -93,16 +119,6 @@
     "draft": false,
     "assets": [
       {
-        "id": 722578539,
-        "name": "CyberFi-0.0.117-x64.dmg",
-        "state": "uploaded"
-      },
-      {
-        "id": 722584336,
-        "name": "CyberFi-0.0.117-x64.dmg.sha256",
-        "state": "uploaded"
-      },
-      {
         "id": 722584377,
         "name": "CyberFi-0.0.117-arm64.dmg",
         "state": "uploaded"
@@ -110,6 +126,16 @@
       {
         "id": 722588995,
         "name": "CyberFi-0.0.117-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 722578539,
+        "name": "CyberFi-0.0.117-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 722584336,
+        "name": "CyberFi-0.0.117-x64.dmg.sha256",
         "state": "uploaded"
       }
     ]
@@ -161,16 +187,6 @@
     "draft": false,
     "assets": [
       {
-        "id": 722336524,
-        "name": "CyberFi-0.0.115-x64.dmg",
-        "state": "uploaded"
-      },
-      {
-        "id": 722342761,
-        "name": "CyberFi-0.0.115-x64.dmg.sha256",
-        "state": "uploaded"
-      },
-      {
         "id": 722342789,
         "name": "CyberFi-0.0.115-arm64.dmg",
         "state": "uploaded"
@@ -178,6 +194,16 @@
       {
         "id": 722348128,
         "name": "CyberFi-0.0.115-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 722336524,
+        "name": "CyberFi-0.0.115-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 722342761,
+        "name": "CyberFi-0.0.115-x64.dmg.sha256",
         "state": "uploaded"
       }
     ]
@@ -208,16 +234,6 @@
     "draft": false,
     "assets": [
       {
-        "id": 722073197,
-        "name": "CyberFi-0.0.114-x64.dmg",
-        "state": "uploaded"
-      },
-      {
-        "id": 722079424,
-        "name": "CyberFi-0.0.114-x64.dmg.sha256",
-        "state": "uploaded"
-      },
-      {
         "id": 722079483,
         "name": "CyberFi-0.0.114-arm64.dmg",
         "state": "uploaded"
@@ -225,6 +241,16 @@
       {
         "id": 722087048,
         "name": "CyberFi-0.0.114-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 722073197,
+        "name": "CyberFi-0.0.114-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 722079424,
+        "name": "CyberFi-0.0.114-x64.dmg.sha256",
         "state": "uploaded"
       }
     ]
@@ -255,21 +281,6 @@
     "draft": false,
     "assets": [
       {
-        "id": 720456311,
-        "name": "CyberFi-0.0.113-x64.exe",
-        "state": "uploaded"
-      },
-      {
-        "id": 720458736,
-        "name": "CyberFi-0.0.113-x64.exe.sha256",
-        "state": "uploaded"
-      },
-      {
-        "id": 720458748,
-        "name": "CyberFi-0.0.113-x64.exe.update.json",
-        "state": "uploaded"
-      },
-      {
         "id": 721184501,
         "name": "CyberFi-0.0.113-x64.dmg",
         "state": "uploaded"
@@ -282,6 +293,21 @@
       {
         "id": 721187936,
         "name": "CyberFi-0.0.113-x64.dmg.verification.json",
+        "state": "uploaded"
+      },
+      {
+        "id": 720456311,
+        "name": "CyberFi-0.0.113-x64.exe",
+        "state": "uploaded"
+      },
+      {
+        "id": 720458736,
+        "name": "CyberFi-0.0.113-x64.exe.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 720458748,
+        "name": "CyberFi-0.0.113-x64.exe.update.json",
         "state": "uploaded"
       }
     ]
