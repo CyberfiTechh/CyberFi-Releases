@@ -22,6 +22,11 @@ public static class CyberFiOwnedLaunch {
     public static string Stage = "initialize";
     public static string CreationApi = "none", TokenMode = "unknown", DesktopMode = "inherited";
     public static bool SelectedTokenVerified = false;
+    public sealed class DesktopAccess {
+        public bool currentStationIsWinSta0, currentDesktopIsDefault;
+        public int stationAllError, stationRequiredError, desktopAllError, desktopRequiredError;
+    }
+    public static DesktopAccess ParentDesktopAccess, SelectedDesktopAccess;
     const uint Query = 8, Suspended = 4, UnicodeEnvironment = 0x400, NoWindow = 0x08000000;
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct StartupInfo {
@@ -43,6 +48,8 @@ public static class CyberFiOwnedLaunch {
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, int bytes, out int required);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool SetTokenInformation(IntPtr token, int kind, IntPtr data, int bytes);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool DuplicateToken(IntPtr token, int level, out IntPtr duplicate);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool ImpersonateLoggedOnUser(IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool RevertToSelf();
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool CheckTokenMembership(IntPtr token, IntPtr sid, out bool member);
     [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool CreateRestrictedToken(IntPtr token, uint flags, uint disableCount, [In] SidAttributes[] disable, uint deleteCount, IntPtr delete, uint restrictCount, IntPtr restrict, out IntPtr restricted);
@@ -60,8 +67,43 @@ public static class CyberFiOwnedLaunch {
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr process, uint code);
     [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
     [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
+    [DllImport("user32.dll")] static extern IntPtr GetProcessWindowStation();
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern IntPtr GetThreadDesktop(uint thread);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformationW(IntPtr handle, int kind, IntPtr data, int bytes, out int required);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenWindowStationW(string name, bool inherit, uint access);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool CloseWindowStation(IntPtr station);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenDesktopW(string name, uint flags, bool inherit, uint access);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(IntPtr desktop);
 
     static void Check(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
+    static string ObjectName(IntPtr handle) {
+        int bytes; GetUserObjectInformationW(handle, 2, IntPtr.Zero, 0, out bytes);
+        if (bytes <= 0 || bytes > 4096) throw new InvalidOperationException("invalid-user-object-name-size");
+        IntPtr data = Marshal.AllocHGlobal(bytes);
+        try { Check(GetUserObjectInformationW(handle, 2, data, bytes, out bytes)); return Marshal.PtrToStringUni(data); }
+        finally { Marshal.FreeHGlobal(data); }
+    }
+    static int ObjectAccess(bool station, uint access) {
+        IntPtr handle = station ? OpenWindowStationW("winsta0", false, access) : OpenDesktopW("default", 0, false, access);
+        if (handle == IntPtr.Zero) return Marshal.GetLastWin32Error();
+        Check(station ? CloseWindowStation(handle) : CloseDesktop(handle)); return 0;
+    }
+    static DesktopAccess ProbeDesktopAccess(IntPtr token) {
+        var probe = new DesktopAccess {
+            currentStationIsWinSta0 = String.Equals(ObjectName(GetProcessWindowStation()), "winsta0", StringComparison.OrdinalIgnoreCase),
+            currentDesktopIsDefault = String.Equals(ObjectName(GetThreadDesktop(GetCurrentThreadId())), "default", StringComparison.OrdinalIgnoreCase)
+        };
+        bool impersonating = false;
+        try {
+            if (token != IntPtr.Zero) { Check(ImpersonateLoggedOnUser(token)); impersonating = true; }
+            probe.stationAllError = ObjectAccess(true, 0x37f);
+            probe.stationRequiredError = ObjectAccess(true, 0x23);
+            probe.desktopAllError = probe.currentStationIsWinSta0 ? ObjectAccess(false, 0x1ff) : -1;
+            probe.desktopRequiredError = probe.currentStationIsWinSta0 ? ObjectAccess(false, 0x83) : -1;
+            return probe;
+        } finally { if (impersonating) Check(RevertToSelf()); }
+    }
     static IntPtr Info(IntPtr token, int kind) {
         int length; GetTokenInformation(token, kind, IntPtr.Zero, 0, out length);
         if (length <= 0 || length > 65536) throw new InvalidOperationException("invalid-token-information");
@@ -148,6 +190,7 @@ public static class CyberFiOwnedLaunch {
         try {
             Stage = "current-token"; Check(OpenProcessToken(GetCurrentProcess(), Query | 2 | 1 | 0x80, out current));
             string sid = Sid(current); bool elevated = Number(current, 20) != 0, parentAdministrator = IsAdministrator(current);
+            Stage = "probe-parent-desktop-access"; ParentDesktopAccess = ProbeDesktopAccess(IntPtr.Zero);
             string tokenMode = "current-medium";
             IntPtr launchToken = current;
             if (elevated) {
@@ -164,6 +207,7 @@ public static class CyberFiOwnedLaunch {
                 launchToken = linked;
             }
             VerifyMedium(launchToken, sid); SelectedTokenVerified = true; TokenMode = tokenMode;
+            Stage = "probe-selected-desktop-access"; SelectedDesktopAccess = ProbeDesktopAccess(launchToken);
             var command = new StringBuilder(Quote(executable));
             foreach (string argument in arguments) command.Append(' ').Append(Quote(argument));
             environment = EnvironmentBlock();
@@ -249,7 +293,7 @@ exit 23
             $selfTestDiagnostic.environmentPreserved = $probe.environmentPreserved -eq $true
             [CyberFiOwnedLaunch]::Stage = 'selftest-assertions'
             if (-not $probe.environmentPreserved -or $result.exitCode -ne 23 -or -not $result.sameSid -or $result.elevated) { throw 'Owned launcher self-test failed.' }
-            [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; creationApi=[CyberFiOwnedLaunch]::CreationApi; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
+            [pscustomobject]@{ success=$true; sameSid=$result.sameSid; elevated=$result.elevated; administrator=$result.administrator; parentElevated=$result.parentElevated; parentAdministrator=$result.parentAdministrator; privilegeDropped=$result.privilegeDropped; launchTokenMode=$result.launchTokenMode; creationApi=[CyberFiOwnedLaunch]::CreationApi; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; parentDesktopAccess=[CyberFiOwnedLaunch]::ParentDesktopAccess; selectedDesktopAccess=[CyberFiOwnedLaunch]::SelectedDesktopAccess; environmentPreserved=$true; exitCodePropagated=$true; guiLaunched=$false } | ConvertTo-Json -Compress
         } finally {
             $probeStage = [CyberFiOwnedLaunch]::Stage
             [CyberFiOwnedLaunch]::Stage = 'selftest-cleanup'
@@ -285,6 +329,6 @@ exit 23
         if ($cause -is [ComponentModel.Win32Exception]) { $nativeError = $cause.NativeErrorCode; break }
         $cause = $cause.InnerException
     }
-    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified; selfTest=$selfTestDiagnostic } | ConvertTo-Json -Compress))
+    [Console]::Error.WriteLine(([pscustomobject]@{ success=$false; stage=[CyberFiOwnedLaunch]::Stage; nativeError=$nativeError; creationApi=[CyberFiOwnedLaunch]::CreationApi; launchTokenMode=[CyberFiOwnedLaunch]::TokenMode; desktopMode=[CyberFiOwnedLaunch]::DesktopMode; selectedTokenVerified=[CyberFiOwnedLaunch]::SelectedTokenVerified; parentDesktopAccess=[CyberFiOwnedLaunch]::ParentDesktopAccess; selectedDesktopAccess=[CyberFiOwnedLaunch]::SelectedDesktopAccess; selfTest=$selfTestDiagnostic } | ConvertTo-Json -Compress))
     exit 1
 }
