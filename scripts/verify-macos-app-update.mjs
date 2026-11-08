@@ -118,7 +118,7 @@ async function main() {
             const dmg = join(root, filename), manifestFile = dmg + ".update.json";
             await download(REPOSITORY, asset, dmg); await download(REPOSITORY, manifest, manifestFile);
             assert.equal(await hashFile(dmg), pin.sha256); assert.equal(await hashFile(manifestFile), pin.manifestSha256);
-            signedManifest(JSON.parse(await readFile(manifestFile, "utf8")), version, filename, pin.sha256, asset.size);
+            signedManifest(JSON.parse((await readFile(manifestFile, "utf8")).replace(/^\uFEFF/u, "")), version, filename, pin.sha256, asset.size);
             await command("/usr/bin/hdiutil", ["verify", dmg]);
             const mount = join(root, "mount-" + kind); await mkdir(mount);
             await command("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount, dmg]); mounts.push(mount);
@@ -333,6 +333,8 @@ if (process.argv.includes("--self-test")) {
     assert.throws(() => artifactPins({ source: { ...pin, sha256: "../bad" }, target: pin }));
     assert.throws(() => allowedRedirect("https://api.github.com.evil.test/file"));
     assert.throws(() => allowedRedirect("http://github.com/file"));
+    assert.deepEqual(JSON.parse(('\uFEFF{"sha256":"' + "a".repeat(64) + '"}').replace(/^\uFEFF/u, "")), { sha256: "a".repeat(64) });
+    assert.throws(() => JSON.parse('\uFEFF\uFEFF{}'.replace(/^\uFEFF/u, "")));
     assert.throws(() => signedManifest({ sha256: "a".repeat(64), size: 10, signature: "A".repeat(512) }, "0.0.124", "CyberFi-0.0.124-x64.dmg", "a".repeat(64), 10));
     console.log("Mac automatic update input, redirect and RSA refusal guards passed; no app or network used.");
 } else await main();
