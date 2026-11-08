@@ -1,4 +1,4 @@
-param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [ValidateSet("0.0.115", "0.0.116")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
+param([switch]$SelfCheck, [string]$UpstreamPath, [switch]$Upgrade115, [switch]$Mcp115, [ValidateSet("0.0.115", "0.0.116", "0.0.117")][string]$TargetVersion = "0.0.115", [string]$TargetSha256)
 $ErrorActionPreference = 'Stop'
 $repo = 'CyberfiTechh/CyberFi-Releases'
 $certificateThumbprint = '2470547AF0CF456E06BF7065399591BBD7EC79ED'
@@ -6,13 +6,22 @@ $expected = @{
     '0.0.113' = 'c1f4e1f2e0b779e5fa808f288255e39b15d01a84cf3e84835e71960333e47deb'
     '0.0.114' = '3bcbe22f5f338cf0d8cb4d6747c69bd11ca347b649b4bc1c8bb48c4fe9ecdae2'
     '0.0.115' = '5d6334d1d7f516cd13c893ffd7a18d1a6bb2511292ff6946c8ffb9c37608ea5a'
+    '0.0.116' = '63b302d6974e233d317af0f14950acb8449b16e3be1f83df1ce9782e385e4dde'
 }
 function Assert-True($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
-if ($TargetVersion -eq '0.0.116') {
-    Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '116 requires an explicit immutable published installer digest'
+if ($TargetVersion -eq '0.0.117') {
+    Assert-True ($TargetSha256 -cmatch '^[a-f0-9]{64}$') '117 requires an explicit immutable published installer digest'
     $expected[$TargetVersion] = $TargetSha256
 }
 
+function Get-UpgradeSource([string]$Target) {
+    switch ($Target) {
+        '0.0.115' { '0.0.114' }
+        '0.0.116' { '0.0.115' }
+        '0.0.117' { '0.0.116' }
+        default { throw 'Unsupported upgrade target' }
+    }
+}
 function Receive-PublishedAsset([string]$Url, [string]$Destination) {
     Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Downloading $([IO.Path]::GetFileName($Destination))"
     & curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 300 --output $Destination $Url
@@ -26,10 +35,14 @@ function Assert-Owned([string]$Path, [string]$Root) {
     $full
 }
 if ($SelfCheck) {
-    Assert-True ($expected.Count -in @(3, 4)) 'Only immutable pinned versions allowed'
+    Assert-True ((Get-UpgradeSource '0.0.115') -eq '0.0.114') '115 source must remain114'
+    Assert-True ((Get-UpgradeSource '0.0.116') -eq '0.0.115') '116 source must remain115'
+    Assert-True ((Get-UpgradeSource '0.0.117') -eq '0.0.116') '117 source must be116'
+
+    Assert-True ($expected.Count -in @(4, 5)) 'Only immutable pinned versions allowed'
     foreach ($entry in $expected.GetEnumerator()) {
         Assert-True ($entry.Value -cmatch '^[a-f0-9]{64}$') 'Invalid pinned digest'
-        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116')) 'Unexpected version'
+        Assert-True ($entry.Key -in @('0.0.113', '0.0.114', '0.0.115', '0.0.116', '0.0.117')) 'Unexpected version'
     }
     Assert-True ($certificateThumbprint -cmatch '^[A-F0-9]{40}$') 'Invalid certificate pin'
     $null = Assert-Owned (Join-Path ([IO.Path]::GetTempPath()) 'owned/item') ([IO.Path]::GetTempPath())
@@ -40,7 +53,7 @@ if ($SelfCheck) {
 }
 Assert-True ($IsWindows -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted' -and
     $env:GITHUB_REPOSITORY -ceq $repo -and $env:GITHUB_REF -eq 'refs/heads/main') 'Only the disposable public Windows runner may install'
-$fromVersion = $(if ($Upgrade115) { if ($TargetVersion -eq '0.0.116') { '0.0.115' } else { '0.0.114' } } else { '0.0.113' })
+$fromVersion = $(if ($Upgrade115) { Get-UpgradeSource $TargetVersion } else { '0.0.113' })
 $toVersion = $(if ($Upgrade115) { $TargetVersion } else { '0.0.114' })
 $versions = $(if ($Mcp115) { @($TargetVersion) } else { @($fromVersion, $toVersion) })
 $rootName = $(if ($Mcp115) { ('cyberfi-windows-mcp-' + $TargetVersion.Replace('0.0.', '')) } elseif ($Upgrade115) { ('cyberfi-windows-upgrade-' + $TargetVersion.Replace('0.0.', '')) } else { 'cyberfi-windows-acceptance' })

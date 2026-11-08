@@ -6,11 +6,11 @@ on:
         inputs:
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116"]
+                options: ["0.0.115", "0.0.116", "0.0.117"]
                 default: "0.0.115"
             target_sha256:
                 type: string
-                description: Required published installer digest for 116
+                description: Required published installer digest for 116/117
                 default: ""
 
 permissions:

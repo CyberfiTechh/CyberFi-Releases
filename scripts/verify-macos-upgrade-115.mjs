@@ -15,10 +15,10 @@ const expected = {
     arm64: { old: "6629c214083e33ae7fdb317c87cf594defa46a34bb820a2022534851fd4f3977", new: "b3dc2cb6f5579f91bb0695c3abc968ba670a7f2ab6612614f88b4ce632dd0564" },
 };
 const newVersion = process.env.TARGET_VERSION || "0.0.115";
-assert(["0.0.115", "0.0.116"].includes(newVersion));
-const oldVersion = newVersion === "0.0.116" ? "0.0.115" : "0.0.114";
-if (newVersion === "0.0.116") {
-    assert(/^[a-f0-9]{64}$/u.test(process.env.EXPECTED_NEW_SHA || ""), "116 requires the explicit published native DMG digest");
+assert(["0.0.115", "0.0.116", "0.0.117"].includes(newVersion));
+const oldVersion = newVersion !== "0.0.115" ? "0.0.115" : "0.0.114";
+if (newVersion !== "0.0.115") {
+    assert(/^[a-f0-9]{64}$/u.test(process.env.EXPECTED_NEW_SHA || ""), "The target requires the explicit published native DMG digest");
     for (const arch of ["x64", "arm64"]) expected[arch] = { old: expected[arch].new, new: process.env.EXPECTED_NEW_SHA };
 }
 const [sourceArgument, rootArgument, oldArgument, newArgument] = process.argv.slice(2);

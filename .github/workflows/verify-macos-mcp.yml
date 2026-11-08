@@ -6,7 +6,7 @@ on:
         inputs:
             target_version:
                 type: choice
-                options: ["0.0.115", "0.0.116"]
+                options: ["0.0.115", "0.0.116", "0.0.117"]
                 default: "0.0.115"
             architecture:
                 type: choice
@@ -70,7 +70,7 @@ jobs:
               run: |
                   set -euo pipefail
                   [[ "$RELEASE_ID" =~ ^[0-9]+$ && "$ASSET_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
-                  case "$TARGET_VERSION" in 0.0.115|0.0.116) ;; *) exit 1 ;; esac
+                  case "$TARGET_VERSION" in 0.0.115|0.0.116|0.0.117) ;; *) exit 1 ;; esac
                   case "$ARCH" in arm64) native=arm64 ;; x64) native=x86_64 ;; *) exit 1 ;; esac
                   test "$(uname -m)" = "$native"
                   gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" > "$RUNNER_TEMP/release.json"
