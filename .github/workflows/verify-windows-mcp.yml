@@ -46,6 +46,7 @@ jobs:
                   path: |
                       ${{ runner.temp }}/cyberfi-windows-mcp-115/evidence
                       ${{ runner.temp }}/cyberfi-windows-mcp-115/mcp-acceptance.json
+                      ${{ runner.temp }}/cyberfi-windows-mcp-115/normal-caller-precondition.json
                       ${{ runner.temp }}/cyberfi-windows-mcp-115/home/.pdr-kocum-agent/mcp-runtime/setup-report.json
                       ${{ runner.temp }}/cyberfi-windows-mcp-115/home/.pdr-kocum-agent/mcp-runtime/*.setup.log
                       ${{ runner.temp }}/cyberfi-windows-mcp-115/triangle.html

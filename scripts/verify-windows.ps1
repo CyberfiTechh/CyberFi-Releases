@@ -228,14 +228,18 @@ if ($Mcp115) {
     $env:CYBERFI_MCP_ACCEPTANCE_REPORT = Join-Path $root 'mcp-acceptance.json'
     $env:ACCEPTANCE_EXE = $exe
     $env:ACCEPTANCE_USER_DATA = $userData
+    $env:ACCEPTANCE_FIXTURE_HELPER = Join-Path $PSScriptRoot 'mcp-acceptance-fixture.mjs'
     $homeBefore = @(Get-ChildItem -LiteralPath $ownedHome -Force -Recurse | Select-Object FullName, Mode)
     ConvertTo-Json -InputObject $homeBefore -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'qa-home-before-launch.json') -Encoding utf8
     Assert-True ($homeBefore.Count -eq 0) 'QA HOME was populated by preparation before Electron launched'
     @'
 import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
 import { gymElectronProcessRun } from './packages/happy-desktop-gym/sources/electron/launch.ts';
-const result = await gymElectronProcessRun({ executablePath: process.env.ACCEPTANCE_EXE,
-    args: [`--user-data-dir=${process.env.ACCEPTANCE_USER_DATA}`], env: process.env, timeout: 40*60_000 });
+const { withMcpCallerPrecondition } = await import(pathToFileURL(process.env.ACCEPTANCE_FIXTURE_HELPER).href);
+const result = await withMcpCallerPrecondition(process.env.CYBERFI_MCP_ACCEPTANCE_ROOT,
+    gymElectronProcessRun({ executablePath: process.env.ACCEPTANCE_EXE,
+    args: [`--user-data-dir=${process.env.ACCEPTANCE_USER_DATA}`], env: process.env, timeout: 40*60_000 }));
 assert.equal(result.exitCode, 0, result.output);
 '@ | Set-Content -LiteralPath (Join-Path $UpstreamPath 'acceptance-mcp.mjs') -Encoding utf8
     Push-Location $UpstreamPath

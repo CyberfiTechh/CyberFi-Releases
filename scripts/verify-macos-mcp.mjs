@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
+import { withMcpCallerPrecondition } from "./mcp-acceptance-fixture.mjs";
 
 const [upstream, executable] = process.argv.slice(2);
 assert(process.platform === "darwin" && upstream && executable);
@@ -32,8 +33,8 @@ const progress = setInterval(async () => {
 }, 30_000);
 let exit;
 try {
-    exit = await gymElectronProcessRun({ executablePath: resolve(executable),
-        args: ["--user-data-dir=" + userData], env, timeout: 40 * 60_000 });
+    exit = await withMcpCallerPrecondition(root, gymElectronProcessRun({ executablePath: resolve(executable),
+        args: ["--user-data-dir=" + userData], env, timeout: 40 * 60_000 }));
 } finally { clearInterval(progress); }
 assert.equal(exit.exitCode, 0, exit.output);
 const result = JSON.parse(await readFile(report, "utf8"));

@@ -90,6 +90,7 @@ jobs:
                   name: CyberFi-macOS-MCP-${{ inputs.architecture }}-${{ inputs.asset_id }}
                   path: |
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/mcp-acceptance.json
+                      ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/normal-caller-precondition.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/setup-report.json
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/home/.pdr-kocum-agent/mcp-runtime/*.setup.log
                       ~/CyberFi-mcp-${{ github.run_id }}-${{ github.run_attempt }}/triangle.html
