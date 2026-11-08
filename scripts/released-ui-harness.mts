@@ -522,10 +522,15 @@ try {
     });
     await run("all presented files have shared registry records without refresh", async () => {
         const api = happyAgentClientCreate(runtime.socketPath, runtime.token);
-        const registry = (await api.getArtifact("ocyberfioutputsregistry01")).artifact;
-        const file = await api.getArtifactFile(registry.id, registry.latestVersion, "index.md");
-        assert.ok(file);
-        const records = JSON.parse(new TextDecoder().decode(file.data)).outputs;
+        let records: any[] = [];
+        for (let attempt = 0; attempt < 100; attempt++) {
+            const registry = (await api.getArtifact("ocyberfioutputsregistry01")).artifact;
+            const file = await api.getArtifactFile(registry.id, registry.latestVersion, "index.md");
+            assert.ok(file);
+            records = JSON.parse(new TextDecoder().decode(file.data)).outputs;
+            if (presentedPaths.every(name => records.some(item => item.name === name))) break;
+            await page.waitForTimeout(200);
+        }
         report.sharedOutputRecords = [];
         for (const name of presentedPaths) {
             const record = records.find((item: any) => item.name === name);
