@@ -52,6 +52,8 @@ jobs:
               working-directory: upstream
               run: pnpm install --frozen-lockfile --ignore-scripts
             - name: Download the published native DMGs
+              env:
+                  GH_TOKEN: ${{ github.token }}
               run: |
                   set -euo pipefail
                   case "$TARGET_VERSION" in 0.0.115|0.0.116|0.0.117|0.0.118|0.0.119|0.0.120) ;; *) exit 1 ;; esac
@@ -68,14 +70,11 @@ jobs:
                     if ! curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
                       "https://github.com/CyberfiTechh/CyberFi-Releases/releases/download/macos-v$version/$name" \
                       --output "$downloads/$name"; then
-                      asset_id="$(curl --fail --retry 2 --connect-timeout 20 --max-time 60 \
-                        "https://api.github.com/repos/CyberfiTechh/CyberFi-Releases/releases/tags/macos-v$version" \
-                        | jq -er --arg name "$name" '[.assets[] | select(.name == $name and .state == "uploaded")] | if length == 1 then .[0].id else error("Expected one exact published DMG") end')"
+                      asset_id="$(gh api "repos/CyberfiTechh/CyberFi-Releases/releases/tags/macos-v$version" \
+                        | jq -er --arg name "$name" 'select(.draft == false) | [.assets[] | select(.name == $name and .state == "uploaded")] | if length == 1 then .[0].id else error("Expected one exact published DMG") end')"
                       [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
-                      curl --fail --location --retry 2 --connect-timeout 20 --max-time 300 \
-                        --header 'Accept: application/octet-stream' \
-                        "https://api.github.com/repos/CyberfiTechh/CyberFi-Releases/releases/assets/$asset_id" \
-                        --output "$downloads/$name"
+                      gh api -H 'Accept: application/octet-stream' \
+                        "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$asset_id" > "$downloads/$name"
                     fi
                   done
             - name: Verify manual replacement, retained profile and fresh 115 launch
