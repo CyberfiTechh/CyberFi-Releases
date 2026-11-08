@@ -9,13 +9,22 @@ guard target.hasSuffix("/CyberFi.app") else { exit(2) }
 let started = Date()
 var samples = 0, systemWindowsMax = 0, onscreenSamples = 0, regularPolicySamples = 0, activeSamples = 0
 var pids = Set<Int32>(), windows = Set<Int>()
+var policySamplesByPid: [String: Int] = [:]
+var policiesByPid: [String: Set<Int>] = [:]
 var violations: [[String: Any]] = []
 
 func sample() {
     samples += 1
     for app in NSWorkspace.shared.runningApplications where app.bundleURL?.resolvingSymlinksInPath().path == target {
         pids.insert(app.processIdentifier)
-        if app.activationPolicy == .regular { regularPolicySamples += 1 }
+        let policy = app.activationPolicy
+        // Count only explicit known AppKit policies; unknown values cannot prove Dock absence.
+        if policy == .regular || policy == .accessory || policy == .prohibited {
+            let key = String(app.processIdentifier)
+            policySamplesByPid[key, default: 0] += 1
+            policiesByPid[key, default: []].insert(policy.rawValue)
+        }
+        if policy == .regular { regularPolicySamples += 1 }
         if app.isActive { activeSamples += 1 }
     }
     guard let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return }
@@ -34,6 +43,7 @@ func finish() -> Never {
     let result: [String: Any] = ["bundle": target, "samples": samples,
         "durationMs": Int(Date().timeIntervalSince(started) * 1000), "systemWindowsMax": systemWindowsMax,
         "pids": pids.sorted(), "windowsOwned": windows.count, "onscreenSamples": onscreenSamples,
+        "policySamplesByPid": policySamplesByPid, "policiesByPid": policiesByPid.mapValues { $0.sorted() },
         "regularPolicySamples": regularPolicySamples, "activeSamples": activeSamples, "violations": violations]
     FileHandle.standardOutput.write(try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
     exit(0)
@@ -52,4 +62,6 @@ timer.schedule(deadline: .now(), repeating: .milliseconds(25))
 timer.setEventHandler { sample() }
 timer.resume()
 DispatchQueue.main.async { sample(); FileHandle.standardError.write(Data("ready\n".utf8)) }
-dispatchMain()
+// NSWorkspace.runningApplications and NSRunningApplication properties refresh only
+// when the main run loop runs in a common mode; dispatchMain alone leaves a stale list.
+RunLoop.main.run()

@@ -314,7 +314,7 @@ async function main() {
         if (video) { report.targetVideo = await video.stop().catch(error => ({ error: String(error) })); if (!(report.targetVideo.framesWritten > 0)) report.success = false; }
         if (observer) {
             report.visibility = await observer().catch(error => ({ error: String(error) }));
-            if (!(report.visibility.systemWindowsMax > 0 && report.visibility.pids?.includes(report.oldPid) && report.visibility.pids?.includes(newPid) && report.visibility.onscreenSamples === 0 && report.visibility.regularPolicySamples === 0 && report.visibility.activeSamples === 0)) report.success = false;
+            if (!(report.visibility.systemWindowsMax > 0 && report.visibility.pids?.includes(report.oldPid) && report.visibility.pids?.includes(newPid) && report.visibility.policySamplesByPid?.[String(report.oldPid)] > 0 && report.visibility.policySamplesByPid?.[String(newPid)] > 0 && report.visibility.onscreenSamples === 0 && report.visibility.regularPolicySamples === 0 && report.visibility.activeSamples === 0)) report.success = false;
         }
         await save();
         // Terminate only the acknowledged process at the owned replacement path, after observing it.
