@@ -1,5 +1,26 @@
 [
   {
+    "tag_name": "v0.0.122",
+    "draft": false,
+    "assets": [
+      {
+        "id": 723798777,
+        "name": "CyberFi-0.0.122-x64.exe",
+        "state": "uploaded"
+      },
+      {
+        "id": 723804707,
+        "name": "CyberFi-0.0.122-x64.exe.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 723804776,
+        "name": "CyberFi-0.0.122-x64.exe.update.json",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "macos-v0.0.121",
     "draft": false,
     "assets": [
