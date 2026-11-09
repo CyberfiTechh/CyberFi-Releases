@@ -613,13 +613,24 @@ exit 23
             foreach ($entry in $entries) {
                 $checked = Get-OwnedEntry $entry.FullName $entry.PSIsContainer
                 if ($checked.PSIsContainer) { [IO.Directory]::Delete($checked.FullName, $false) }
-                else { [IO.File]::Delete($checked.FullName) }
+                else {
+                    $relative = $checked.FullName.Substring($directory.FullName.Length + 1)
+                    # The daemon creates its managed docs and skills as read-only.
+                    if ($relative -match '^tmp\\hdg\\g-[a-f0-9]{8}\\[.]happy\\(?:docs|skills)\\' -and
+                        ($checked.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -and -not $checked.LinkType) {
+                        $checked.IsReadOnly = $false
+                    }
+                    [IO.File]::Delete($checked.FullName)
+                }
             }
             [IO.Directory]::Delete($directory.FullName, $false)
             $report.fixtureRemoved = $true
         } catch {
             $report.fixtureRemoved = $false
             $report.fixtureCleanupFailureType = $_.Exception.GetType().Name
+            $inner = $_.Exception.GetBaseException()
+            $report.fixtureCleanupCause = $inner.GetType().Name
+            $report.fixtureCleanupHResult = $inner.HResult
         }
     }
     if ($password) { $password.Dispose() }
