@@ -1,5 +1,26 @@
 [
   {
+    "tag_name": "v0.0.130",
+    "draft": false,
+    "assets": [
+      {
+        "id": 727697340,
+        "name": "CyberFi-0.0.130-x64.exe",
+        "state": "uploaded"
+      },
+      {
+        "id": 727719138,
+        "name": "CyberFi-0.0.130-x64.exe.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 727719443,
+        "name": "CyberFi-0.0.130-x64.exe.update.json",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "macos-v0.0.129",
     "draft": false,
     "assets": [
