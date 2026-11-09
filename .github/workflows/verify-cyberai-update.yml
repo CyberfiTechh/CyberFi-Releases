@@ -1,5 +1,5 @@
 name: Verify CyberAI published native automatic update
-run-name: CyberAI 128 to 129 automatic update ${{ inputs.target }}
+run-name: CyberAI 129 to 130 automatic update ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -11,10 +11,10 @@ permissions:
     contents: read
 jobs:
     native:
-        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/macos-update-130-acceptance' && inputs.target != 'windows'
         permissions:
             contents: read # Both pinned source and target must already be public.
-        runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-15' || 'macos-15-intel' }}
+        runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-26' || 'macos-15-intel' }}
         timeout-minutes: 35
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -61,7 +61,7 @@ jobs:
               env:
                   TARGET: ${{ inputs.target }}
                   ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
-                  ACCEPTANCE_SOURCE_SHA: b4c6aa448381907d0a6459886a91f1800b92236a
+                  ACCEPTANCE_SOURCE_SHA: 41b2f60fa0e15ce66883c85a7b14fb05b24aaff3
                   GH_TOKEN: ${{ github.token }}
                   CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI125_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
                   CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI125_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
