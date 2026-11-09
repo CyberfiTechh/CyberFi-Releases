@@ -1,5 +1,5 @@
 name: Verify CyberAI fresh Windows engine onboarding
-run-name: CyberAI 131 signed draft clean profile engine setup ${{ inputs.target }}
+run-name: CyberAI 131 signed draft clean profile stable engine 124 setup ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -11,7 +11,7 @@ permissions:
     contents: read
 jobs:
     native:
-        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/windows-fresh-engine-131' && inputs.target == 'windows'
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/windows-fresh-engine-124-acceptance' && inputs.target == 'windows'
         permissions:
             contents: write # Required by GitHub to download the exact signed draft assets.
         runs-on: windows-2025

@@ -15,6 +15,13 @@ import { EventEmitter } from "node:events";
 
 const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.131";
 const EXPECT_REPRO = false;
+const ENGINE_VERSION = "0.4.124";
+const REVIEWED_ENGINE = {
+    releaseId: 439320664,
+    assetId: 728013378,
+    archiveBytes: 233262384,
+    digest: "sha256:3f6128ff754d5115c76734c5f5103290bd8831c17f389068d7c381dad193d73c",
+};
 const TARGET_INSTALLER = `CyberFi-${VERSION}-x64.exe`;
 const SOURCE_COMMIT = "d070120ddfdfa8b769e3fcc0b6cacee704306598";
 const exec = promisify(execFile);
@@ -110,7 +117,7 @@ async function main() {
     const target = process.env.TARGET;
     assert(target === "windows", "Only Windows update target is supported");
     const windows = target === "windows", arch = target === "macos-arm64" ? "arm64" : "x64";
-    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-fresh-engine-131", "Only the selected disposable native runner may execute acceptance");
+    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-fresh-engine-124-acceptance", "Only the selected disposable native runner may execute acceptance");
     const pins = Object.fromEntries(Object.entries(REVIEWED_ARTIFACTS).map(([kind, pin]) => [kind, artifactPins(pin)]));
     assert.equal(process.env.ACCEPTANCE_SOURCE_SHA, SOURCE_COMMIT, "Unexpected reviewed source provenance");
     // These lexical variables are never passed to child processes or serialized.
@@ -180,44 +187,6 @@ $full=[Security.AccessControl.FileSystemRights]::FullControl
         return { onlyReadAccess: true, states, daemonLog, daemonLogBytes: file?.size ?? 0 };
     }
 
-        const aclInitializer = [
-            "$ErrorActionPreference = 'Stop'",
-            "$target = Get-Item -LiteralPath $env:HAPPY_PRIVATE_DIRECTORY -Force",
-            "if (($target.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Private state cannot be a reparse point.' }",
-            "$identity = [Security.Principal.WindowsIdentity]::GetCurrent().User",
-            "$acl = [Security.AccessControl.DirectorySecurity]::new()",
-            "$acl.SetOwner($identity)",
-            "$acl.SetAccessRuleProtection($true, $false)",
-            "foreach ($sid in @($identity, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) { $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')) }",
-            "$target.SetAccessControl($acl)",
-        ].join("\n");
-    async function runFreshAclInitializer(nativeHome, standardTemp) {
-        const probeRoot = join(nativeHome, "cyberfi-synthetic-acl-probe");
-        await assert.rejects(lstat(probeRoot), { code: "ENOENT" });
-        await mkdir(probeRoot);
-        assert.equal((await realpath(probeRoot)).toLowerCase(), probeRoot.toLowerCase());
-        let result = [];
-        for (const kind of ["launcher-temp", "ordinary-profile-temp"]) {
-            const directory = join(probeRoot, kind);
-            await mkdir(directory);
-            assert.equal((await realpath(directory)).toLowerCase(), directory.toLowerCase());
-            const env = { ...safeEnv, HAPPY_PRIVATE_DIRECTORY: directory };
-            if (kind === "ordinary-profile-temp") { env.TEMP = standardTemp; env.TMP = standardTemp; }
-            const begin = Date.now();
-            try {
-                const completed = await exec(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
-                    Buffer.from(aclInitializer, "utf16le").toString("base64")],
-                    { env, timeout: 30000, maxBuffer: 16384, windowsHide: true });
-                result.push({ kind, exitCode: 0, elapsedMs: Date.now() - begin, timedOut: false,
-                    stdoutBytes: Buffer.byteLength(completed.stdout), stderr: classifyWindowsFailure(completed.stderr) });
-            } catch (error) {
-                result.push({ kind, exitCode: Number.isSafeInteger(error.code) ? error.code : null, elapsedMs: Date.now() - begin,
-                    timedOut: error.killed === true, signal: /^SIG[A-Z0-9]+$/u.test(error.signal ?? "") ? error.signal : null,
-                    stderr: classifyWindowsFailure(error.stderr ?? error.message) });
-            }
-        }
-        return result;
-    }
     async function windowsSignature(path) {
         // Check the actual embedded Authenticode CMS cryptographically without
         // installing a root certificate or treating offline chain failures as trust.
@@ -281,7 +250,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         report.profileInitiallyAbsent = true;
         report.engineInitiallyAbsent = true;
         report.normalPackagedMode = true;
-        stage = "exact owned PowerShell ACL initializer probe";
+        stage = "ordinary standard-user temp precondition";
         const localAppData = await realpath(environmentValue(safeEnv, "LOCALAPPDATA"));
         assert.equal(localAppData.toLowerCase(), join(nativeHome, "AppData", "Local").toLowerCase());
         const standardTemp = join(localAppData, "Temp");
@@ -298,7 +267,6 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             launcherModulePathMatchesNativeSystemModules: environmentValue(safeEnv, "PSModulePath").toLowerCase() === canonicalModulePath.toLowerCase(),
             sandboxOverrideSuppliedToApp: false,
         };
-        report.exactNativeAclProbe = await runFreshAclInitializer(nativeHome, standardTemp);
 
         const artifacts = {};
         for (const [kind, version] of [["target", VERSION]]) {
@@ -326,10 +294,11 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         assert.equal(await powershell(`(Get-Item -LiteralPath ${quote(executable)}).VersionInfo.ProductVersion`), VERSION + ".0");
         report.sourceSignature = await windowsSignature(executable);
         stage = "public stable engine identity";
-        const release = await api("repos/CyberfiTechh/CyberFi-Engine/releases/439192562");
-        const engineAsset = release.assets.find(a => a.id === 727661918);
-        assert(release.tag_name === "v0.4.123" && release.draft === false && release.prerelease === false);
-        assert(engineAsset?.digest === "sha256:b8dd42a4f57345220d3c39bffc8d561b406989fab841c23a10d0b580a85ed418");
+        const release = await api(`repos/CyberfiTechh/CyberFi-Engine/releases/${REVIEWED_ENGINE.releaseId}`);
+        const engineAsset = release.assets.find(a => a.id === REVIEWED_ENGINE.assetId);
+        assert(release.id === REVIEWED_ENGINE.releaseId && release.tag_name === `v${ENGINE_VERSION}` && release.draft === false && release.prerelease === false);
+        assert(engineAsset?.name === `happy-agent-${ENGINE_VERSION}-win32-x64.tar.gz` && engineAsset.state === "uploaded");
+        assert(engineAsset.size === REVIEWED_ENGINE.archiveBytes && engineAsset.digest === REVIEWED_ENGINE.digest);
         report.stableEngineRelease = { releaseId: release.id, assetId: engineAsset.id, archiveBytes: engineAsset.size, digest: engineAsset.digest };
         const gym = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
 
@@ -404,7 +373,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
                 await delay(300);
                 continue;
             }
-            if (snapshot.installedVersion === "0.4.123" && snapshot.operation === "idle" &&
+            if (snapshot.installedVersion === ENGINE_VERSION && snapshot.operation === "idle" &&
                 snapshot.engineRuntime === "stopped" && snapshot.errorPresent) {
                 const messages = await page.evaluate(async () => {
                     const [daemon, onboarding, runtime] = await Promise.all([
@@ -429,11 +398,11 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             if (preparingWithoutDownload) waitingSince ??= Date.now();
             else waitingSince = undefined;
             if (EXPECT_REPRO && waitingSince !== undefined && Date.now() - waitingSince >= 25_000) break;
-            if (snapshot.runtimePhase === "ready" && snapshot.runningVersion === "0.4.123" &&
-                snapshot.engineRuntime === "ready" && snapshot.installedVersion === "0.4.123") break;
+            if (snapshot.runtimePhase === "ready" && snapshot.runningVersion === ENGINE_VERSION &&
+                snapshot.engineRuntime === "ready" && snapshot.installedVersion === ENGINE_VERSION) break;
             await delay(700);
         }
-        engine = join(engineHome, ".happy", "dist", "version", "0.4.123", "happy-agent.exe");
+        engine = join(engineHome, ".happy", "dist", "version", ENGINE_VERSION, "happy-agent.exe");
         if (EXPECT_REPRO) {
             assert(waitingSince !== undefined && Date.now() - waitingSince >= 25_000, "Known preparing stall was not reproduced");
             await assert.rejects(lstat(engine), { code: "ENOENT" });
@@ -441,18 +410,18 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             report.preparingStallDurationMs = Date.now() - waitingSince;
             await page.screenshot({ path: join(evidence, "fresh-engine-preparing.png"), mask: [page.getByText(username, { exact: true })] });
         } else {
-            assert(snapshot?.runtimePhase === "ready" && snapshot.runningVersion === "0.4.123" &&
-                snapshot.engineRuntime === "ready" && snapshot.installedVersion === "0.4.123", "Real first-run engine never became ready");
+            assert(snapshot?.runtimePhase === "ready" && snapshot.runningVersion === ENGINE_VERSION &&
+                snapshot.engineRuntime === "ready" && snapshot.installedVersion === ENGINE_VERSION, "Real first-run engine never became ready");
             assert(report.progress.some(row => row.installation === "missing"), "No first-run missing engine state was observed");
-            assert(report.progress.some(row => row.operation === "downloading" && row.download?.bytes > 0), "No measured engine download was observed");
+            assert(report.progress.some(row => row.operation === "downloading" && row.download?.bytes > 0 && row.download.total === engineAsset.size), "No measured engine download was observed");
             stage = "native engine binary and real renderer readiness";
             const binary = await lstat(engine);
             assert(binary.isFile() && !binary.isSymbolicLink());
             assert.equal((await realpath(engine)).toLowerCase(), engine.toLowerCase());
-            assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.123");
+            assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), ENGINE_VERSION);
             report.installedEngineSha256 = await hashFile(engine);
             report.desktopConnected = true;
-            report.installedEngineVersion = "0.4.123";
+            report.installedEngineVersion = ENGINE_VERSION;
             await page.screenshot({ path: join(evidence, "fresh-engine-ready.png"), mask: [page.getByText(username, { exact: true })] });
         }
         report.success = true;
