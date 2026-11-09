@@ -71,6 +71,44 @@ function Get-FixtureEntries([IO.DirectoryInfo]$Directory) {
     }
 }
 
+function Get-OwnedCleanupAcl($Entry, [string[]]$TrustedOwnerSids) {
+    if ($Entry.LinkType) { throw 'A linked entry cannot be modified during fixture cleanup.' }
+    $acl = Get-Acl -LiteralPath $Entry.FullName
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin $TrustedOwnerSids) { throw 'Unexpected scratch owner.' }
+    return $acl
+}
+
+function Remove-OwnedFixtureEntry($Entry, [string]$OwnedRoot, [Security.Principal.SecurityIdentifier]$AdminSid, [string[]]$TrustedOwnerSids) {
+    $path = $Entry.FullName
+    if ($path -ine $OwnedRoot -and -not $path.StartsWith($OwnedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Fixture cleanup escaped its exact owned root.'
+    }
+    $checked = Get-OwnedEntry $path $Entry.PSIsContainer
+    $readOnly = -not $checked.PSIsContainer -and ($checked.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0
+    $delete = {
+        if ($checked.PSIsContainer) { [IO.Directory]::Delete($checked.FullName, $false) }
+        else {
+            if ($readOnly) {
+                $null = Get-OwnedCleanupAcl $checked $TrustedOwnerSids
+                $checked.IsReadOnly = $false
+            }
+            [IO.File]::Delete($checked.FullName)
+        }
+    }
+    try { & $delete }
+    catch {
+        if ($_.Exception.GetBaseException() -isnot [UnauthorizedAccessException]) { throw }
+        $checked = Get-OwnedEntry $path $Entry.PSIsContainer
+        $acl = Get-OwnedCleanupAcl $checked $TrustedOwnerSids
+        $rights = [Security.AccessControl.FileSystemRights]'Delete,WriteAttributes'
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($AdminSid, $rights, 'Allow'))
+        Set-Acl -LiteralPath $checked.FullName -AclObject $acl
+        $checked = Get-OwnedEntry $path $Entry.PSIsContainer
+        & $delete
+    }
+}
+
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -610,20 +648,11 @@ exit 23
             # Validate the full tree before deletion and recheck each literal entry.
             # The walk emits children first and never follows reparse points.
             $entries = @(Get-FixtureEntries $directory)
+            $trustedOwners = @($identity.User.Value, $accountSid.Value, 'S-1-5-18', 'S-1-5-32-544')
             foreach ($entry in $entries) {
-                $checked = Get-OwnedEntry $entry.FullName $entry.PSIsContainer
-                if ($checked.PSIsContainer) { [IO.Directory]::Delete($checked.FullName, $false) }
-                else {
-                    $relative = $checked.FullName.Substring($directory.FullName.Length + 1)
-                    # The daemon creates its managed docs and skills as read-only.
-                    if ($relative -match '^tmp\\hdg\\g-[a-f0-9]{8}\\[.]happy\\(?:docs|skills)\\' -and
-                        ($checked.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -and -not $checked.LinkType) {
-                        $checked.IsReadOnly = $false
-                    }
-                    [IO.File]::Delete($checked.FullName)
-                }
+                Remove-OwnedFixtureEntry $entry $ownedRoot $identity.User $trustedOwners
             }
-            [IO.Directory]::Delete($directory.FullName, $false)
+            Remove-OwnedFixtureEntry $directory $ownedRoot $identity.User $trustedOwners
             $report.fixtureRemoved = $true
         } catch {
             $report.fixtureRemoved = $false
