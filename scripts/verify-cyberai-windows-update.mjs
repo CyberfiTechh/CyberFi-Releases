@@ -79,6 +79,9 @@ function classifyWindowsFailure(input) {
         diagnostics: [...new Set((text.match(/\b(?:EACCES|EPERM|ENOENT|EADDRINUSE|WSAEACCES|ERR_[A-Z_]{3,40})\b/gu) ?? []))].slice(0, 12),
     };
 }
+function windowsFailureKey(messages) {
+    return createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+}
 async function hashFile(path) {
     const value = createHash("sha256"); for await (const chunk of createReadStream(path)) value.update(chunk); return value.digest("hex");
 }
@@ -319,8 +322,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             application.once("error", () => resolve());
             application.once("exit", () => resolve());
         });
-        async function connect() {
-            const until = Date.now() + 90000;
+        async function connect(until = Date.now() + 90000) {
             while (Date.now() < until) {
                 try { const response = await fetch(endpoint + "/json/list", { signal: AbortSignal.timeout(1500) }); if (response.ok && (await response.json()).some(item => item.type === "page")) {
                     browser = await chromium.connectOverCDP(endpoint); page = browser.contexts().flatMap(value => value.pages()).find(value => !value.url().startsWith("devtools:"));
@@ -363,6 +365,15 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         };
         const startedAt = Date.now(), end = startedAt + (EXPECT_REPRO ? 90_000 : 5 * 60000);
         const failuresSeen = new Set();
+        const observationFailures = new Set();
+        const observeFailure = (probe, error) => {
+            const name = ["AssertionError", "TimeoutError", "Error"].includes(error?.name) ? error.name : "OtherError";
+            const code = /^[A-Z][A-Z0-9_]{1,40}$/u.test(error?.code ?? "") ? error.code : null;
+            const key = `${probe}:${name}:${code}`;
+            if (observationFailures.has(key)) return;
+            observationFailures.add(key);
+            (report.observationFailures ??= []).push({ probe, name, code, elapsedMs: Date.now() - startedAt });
+        };
         let lastKey, snapshot, waitingSince;
         while (Date.now() < end) {
             try {
@@ -382,12 +393,16 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
                         downloadingText: /^(İndiriliyor…|Downloading…)$/mu.test(visibleText),
                         startingText: /^(Başlatılıyor…|Starting…)$/mu.test(visibleText) };
                 });
-            } catch {
-                await connect();
+            } catch (error) {
+                observeFailure("renderer-state", error);
+                await connect(Math.min(end, Date.now() + 5000)).catch(error => observeFailure("renderer-reconnect", error));
                 await delay(300);
                 continue;
             }
-            snapshot.daemonPid = await daemonPid();
+            snapshot.daemonPid = await daemonPid().catch(error => {
+                observeFailure("daemon-pid", error);
+                return null;
+            });
             if (snapshot.installedVersion === ENGINE_VERSION && snapshot.operation === "idle" &&
                 snapshot.engineRuntime === "stopped" && snapshot.errorPresent) {
                 const messages = await page.evaluate(async () => {
@@ -397,9 +412,12 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
                     const bounded = value => typeof value === "string" ? value.slice(0, 32768) : "";
                     return { daemon: bounded(daemon.error), onboarding: bounded(onboarding.error ?? onboarding.message),
                         runtime: bounded(runtime.message) };
+                }).catch(error => {
+                    observeFailure("daemon-error-state", error);
+                    return undefined;
                 });
-                const failureKey = hash(JSON.stringify(messages));
-                if (!failuresSeen.has(failureKey)) {
+                const failureKey = messages === undefined ? undefined : windowsFailureKey(messages);
+                if (failureKey !== undefined && !failuresSeen.has(failureKey)) {
                     failuresSeen.add(failureKey);
                     const classified = Object.fromEntries(Object.entries(messages).map(([kind, value]) => [kind, classifyWindowsFailure(value)]));
                     report.startFailure ??= classified;
@@ -437,7 +455,15 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             const binary = await lstat(engine);
             assert(binary.isFile() && !binary.isSymbolicLink());
             assert.equal((await realpath(engine)).toLowerCase(), engine.toLowerCase());
-            const pid = id(snapshot.daemonPid ?? await daemonPid());
+            let observedPid = snapshot.daemonPid;
+            for (const until = Date.now() + 10000; !observedPid && Date.now() < until;) {
+                observedPid = await daemonPid().catch(error => {
+                    observeFailure("ready-daemon-pid", error);
+                    return null;
+                });
+                if (!observedPid) await delay(200);
+            }
+            const pid = id(observedPid);
             const runningPath = await powershell(`(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').ExecutablePath`);
             assert.equal(runningPath.toLowerCase(), engine.toLowerCase());
             report.runningEnginePid = pid;
@@ -450,6 +476,8 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         report.success = true;
     } catch (error) {
         report.failedStage = stage;
+        report.failureKind = ["AssertionError", "TimeoutError", "Error"].includes(error?.name) ? error.name : "OtherError";
+        report.failureCode = /^[A-Z][A-Z0-9_]{1,40}$/u.test(error?.code ?? "") ? error.code : null;
         report.errors.push("Fresh native engine onboarding did not complete");
         report.commandFailure = error.cyberaiCommand;
         if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), mask: [page.locator('input[name="username"], input[name="password"]'), page.getByText(username, { exact: true }), page.getByText(/Command failed:|EncodedCommand|happy-agent.exe start/iu)] }).catch(() => undefined);
@@ -472,6 +500,8 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
     assert(report.success, "Fresh Windows engine onboarding incomplete; inspect automatic-update.json"); console.log(JSON.stringify({ success: true, evidence }));
 }
 if (process.argv.includes("--self-test")) {
+    assert.match(windowsFailureKey({ daemon: "first startup error" }), /^[a-f0-9]{64}$/u);
+    assert.notEqual(windowsFailureKey({ daemon: "first startup error" }), windowsFailureKey({ daemon: "second startup error" }));
     assert.deepEqual(sanitizedEnvironment({ CYBERAI_USERNAME: "private", CYBERAI_PASSWORD: "private", GH_TOKEN: "private", NODE_OPTIONS: "unsafe", SystemRoot: "C:\\Windows" }), { SystemRoot: "C:\\Windows" });
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Target page, context or browser has been closed\r\nCall log:")));
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Execution context was destroyed, most likely because of a navigation")));
