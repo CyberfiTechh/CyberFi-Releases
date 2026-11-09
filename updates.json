@@ -1,5 +1,41 @@
 [
   {
+    "tag_name": "macos-v0.0.130",
+    "draft": false,
+    "assets": [
+      {
+        "id": 727743752,
+        "name": "CyberFi-0.0.130-arm64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 727761547,
+        "name": "CyberFi-0.0.130-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 727761788,
+        "name": "CyberFi-0.0.130-arm64.dmg.update.json",
+        "state": "uploaded"
+      },
+      {
+        "id": 727723926,
+        "name": "CyberFi-0.0.130-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 727743199,
+        "name": "CyberFi-0.0.130-x64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 727743516,
+        "name": "CyberFi-0.0.130-x64.dmg.update.json",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "v0.0.130",
     "draft": false,
     "assets": [
