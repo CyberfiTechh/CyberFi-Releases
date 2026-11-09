@@ -15,12 +15,12 @@ import { EventEmitter } from "node:events";
 
 const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.131";
 const EXPECT_REPRO = false;
-const ENGINE_VERSION = "0.4.124";
+const ENGINE_VERSION = "0.4.125";
 const REVIEWED_ENGINE = {
-    releaseId: 439320664,
-    assetId: 728013378,
-    archiveBytes: 233262384,
-    digest: "sha256:3f6128ff754d5115c76734c5f5103290bd8831c17f389068d7c381dad193d73c",
+    releaseId: 439371035,
+    assetId: 728153446,
+    archiveBytes: 233262446,
+    digest: "sha256:686d1d870d6b9300c13a3b2a8afcea11c54d2702f2873f7c25647dca1ac409aa",
 };
 const TARGET_INSTALLER = `CyberFi-${VERSION}-x64.exe`;
 const SOURCE_COMMIT = "d070120ddfdfa8b769e3fcc0b6cacee704306598";
@@ -120,7 +120,7 @@ async function main() {
     const target = process.env.TARGET;
     assert(target === "windows", "Only Windows update target is supported");
     const windows = target === "windows", arch = target === "macos-arm64" ? "arm64" : "x64";
-    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-fresh-engine-124-acceptance", "Only the selected disposable native runner may execute acceptance");
+    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-fresh-engine-125-acceptance", "Only the selected disposable native runner may execute acceptance");
     const pins = Object.fromEntries(Object.entries(REVIEWED_ARTIFACTS).map(([kind, pin]) => [kind, artifactPins(pin)]));
     assert.equal(process.env.ACCEPTANCE_SOURCE_SHA, SOURCE_COMMIT, "Unexpected reviewed source provenance");
     // These lexical variables are never passed to child processes or serialized.
