@@ -328,7 +328,10 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         // Windows AF_UNIX sun_path has room for 107 bytes plus the terminator.
         assert(Buffer.byteLength(join(paths.happyHome, "agent", "h.sock")) <= 107, "Owned fixture exceeds the Windows engine socket path limit");
         stage = "owned engine daemon startup";
-        runtime = { stop }; await command(engine, ["start"], { cwd: paths.root, env: engineEnv });
+        runtime = { stop };
+        const engineStart = Date.now();
+        try { await command(engine, ["start"], { cwd: paths.root, env: engineEnv }); }
+        finally { report.engineStartElapsedMs = Date.now() - engineStart; }
         stage = "owned engine authenticated health";
         let client; const healthDeadline = Date.now() + 30000;
         while (Date.now() < healthDeadline) {
@@ -503,8 +506,18 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             const log = await lstat(logPath).catch(() => undefined);
             const content = log?.isFile() && !log.isSymbolicLink() && log.size <= 65536 && await realpath(logPath).catch(() => undefined) === logPath
                 ? await readFile(logPath, "utf8").catch(() => "") : "";
-            report.engineDaemonDiagnosticCodes = [...new Set([content, error.stdout, error.stderr].join("\n")
-                .match(/\b(?:EADDRINUSE|EACCES|EPERM|ENOENT|ENAMETOOLONG|EINVAL|ENOTSUP|WSAEINVAL|WSAEACCES)\b/gu) ?? [])];
+            const stderr = String(error.stderr ?? "");
+            report.engineStartupDiagnostic = {
+                logBytes: log?.size ?? null,
+                stderrBytes: Buffer.byteLength(stderr),
+                readinessTimeout: /timed out (?:while starting|waiting for)/iu.test(stderr),
+                childExit: /daemon failed to start \(exit code (-?[0-9]+)\)/iu.exec(stderr)?.[1] ?? null,
+                aclFailure: /SetAccessControl|HAPPY_PRIVATE_DIRECTORY|UnauthorizedAccessException|AccessDenied/iu.test(content + stderr),
+                configFailure: /Invalid configuration|TOML parse|failed to parse/iu.test(content + stderr),
+                nativeLaunchFailure: /LoadLibrary|unable to open library|DLL_INIT_FAILED|failed to spawn|embedded.{0,40}(?:error|failed)/iu.test(content + stderr),
+                socketFailure: /failed to bind|socket.{0,40}(?:already|invalid|error)/iu.test(content + stderr),
+                codes: [...new Set((content + stderr).match(/\b(?:EADDRINUSE|EACCES|EPERM|ENOENT|ENAMETOOLONG|EINVAL|ENOTSUP|WSAEINVAL|WSAEACCES|ERR_[A-Z_]{3,45})\b/gu) ?? [])],
+            };
         }
         report.handoffDiagnostic = {
             failureCode: monitorError ? "update-monitor-failed" : runError ? "source-launcher-failed" : "acceptance-assertion-failed",
