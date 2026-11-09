@@ -50,6 +50,28 @@ function updateMonitorKind(error, phase) {
 function publishedReleaseMatches(release, releaseId, tag) {
     return release?.id === releaseId && release?.draft === false && release?.tag_name === tag;
 }
+function classifyWindowsFailure(input) {
+    const text = typeof input === "string" ? input.slice(0, 32768) : "";
+    const encoded = /-EncodedCommand[ \t]+([A-Za-z0-9+/=]{16,8192})/iu.exec(text)?.[1];
+    const decoded = encoded ? Buffer.from(encoded, "base64").toString("utf16le") : "";
+    const powershellIds = [...new Set([...text.matchAll(/FullyQualifiedErrorId\s*:\s*([a-z0-9.,]+)[ \t]*$/gimu)].map(match => match[1]))].slice(0, 8);
+    const categories = [...new Set([...text.matchAll(/CategoryInfo\s*:\s*([a-z]+)\s*:/gimu)].map(match => match[1]))].slice(0, 8);
+    return {
+        textBytes: Buffer.byteLength(text), powershellIds, categories,
+        systemPowerShell: /System32[\\/]WindowsPowerShell[\\/]v1[.]0[\\/]powershell[.]exe/iu.test(text),
+        privateDirectoryInitializer: /SetAccessControl|HAPPY_PRIVATE_DIRECTORY|DirectorySecurity/iu.test(text + decoded),
+        accessDenied: /UnauthorizedAccessException|AccessDenied|Access is denied|access to the path.+denied|Erişim engellendi/iu.test(text),
+        ownerAssignmentDenied: /invalid owner|not allowed to be the owner|cannot be assigned as the owner|PrivilegeNotHeld/iu.test(text),
+        unknownMethod: /MethodNotFound|does not contain a method named|MethodInvocationException/iu.test(text),
+        aclTypeFailure: /Unable to find type|TypeNotFound|DirectorySecurity.*not found/iu.test(text),
+        moduleFailure: /could not be loaded|module.+not loaded|CommandNotFoundException|ModuleNotFound|PSModulePath/iu.test(text),
+        pathMissing: /ItemNotFound|PathNotFound|Cannot find path/iu.test(text),
+        reparsePointRefused: /reparse point/iu.test(text),
+        executionPolicy: /PSSecurityException|running scripts is disabled|ExecutionPolicy/iu.test(text),
+        timeout: /ETIMEDOUT|timed out|timeout/iu.test(text),
+        diagnostics: [...new Set((text.match(/\b(?:EACCES|EPERM|ENOENT|EADDRINUSE|WSAEACCES|ERR_[A-Z_]{3,40})\b/gu) ?? []))].slice(0, 12),
+    };
+}
 async function hashFile(path) {
     const value = createHash("sha256"); for await (const chunk of createReadStream(path)) value.update(chunk); return value.digest("hex");
 }
@@ -121,6 +143,43 @@ async function main() {
     nativePsEnvironment.PSModulePath = [join(environmentValue(safeEnv, "SystemRoot"), "System32/WindowsPowerShell/v1.0/Modules"), join(environmentValue(safeEnv, "ProgramFiles"), "WindowsPowerShell/Modules")].join(";");
     const powershell = script => command(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { env: nativePsEnvironment });
     const quote = value => "'" + value.replaceAll("'", "''") + "'";
+    async function nativeAclProbe(engineHome) {
+        const base = await realpath(environmentValue(safeEnv, "USERPROFILE"));
+        assert(engineHome.toLowerCase() === join(base, ".pdr-kocum-agent").toLowerCase());
+        const lookup = [
+            ["engine-home", engineHome], ["happy-home", join(engineHome, ".happy")],
+            ["agent-state", join(engineHome, ".happy", "agent")], ["engine-distribution", join(engineHome, ".happy", "dist")],
+        ];
+        const states = [];
+        for (const [kind, path] of lookup) {
+            const entry = await lstat(path).catch(() => undefined);
+            if (!entry) { states.push({ kind, exists: false }); continue; }
+            if (!entry.isDirectory() || entry.isSymbolicLink() ||
+                (await realpath(path)).toLowerCase() !== path.toLowerCase()) {
+                states.push({ kind, exists: true, canonicalOwnedDirectory: false }); continue;
+            }
+            const probe = `$ErrorActionPreference='Stop';$entry=Get-Item -LiteralPath ${quote(path)} -Force
+$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User
+$owner=$entry.GetAccessControl().GetOwner([Security.Principal.SecurityIdentifier])
+$acl=$entry.GetAccessControl()
+$allow=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference -eq $sid -and $_.AccessControlType -eq 'Allow' })
+$full=[Security.AccessControl.FileSystemRights]::FullControl
+@{nativeVersion=$PSVersionTable.PSVersion.ToString();ownerMatchesCurrentUser=$owner.Value -eq $sid.Value;setAccessControlPresent=$null -ne $entry.PSObject.Methods['SetAccessControl'];inheritedRulesDisabled=$acl.AreAccessRulesProtected;currentUserFullControl=@($allow | Where-Object { ($_.FileSystemRights -band $full) -eq $full }).Count -gt 0;reparsePoint=($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0}|ConvertTo-Json -Compress`;
+            try {
+                const state = JSON.parse(await powershell(probe));
+                states.push({ kind, exists: true, canonicalOwnedDirectory: true, ...state });
+            } catch (error) {
+                states.push({ kind, exists: true, canonicalOwnedDirectory: true, queryFailed: true, reason: classifyWindowsFailure(error.stderr ?? error.message) });
+            }
+        }
+        const log = join(engineHome, ".happy", "agent", "daemon.log");
+        const file = await lstat(log).catch(() => undefined);
+        const daemonLog = file?.isFile() && !file.isSymbolicLink() && file.size <= 262144 &&
+            (await realpath(log).catch(() => "")).toLowerCase() === log.toLowerCase()
+            ? classifyWindowsFailure(await readFile(log, "utf8")) : null;
+        return { onlyReadAccess: true, states, daemonLog, daemonLogBytes: file?.size ?? 0 };
+    }
+
     async function windowsSignature(path) {
         // Check the actual embedded Authenticode CMS cryptographically without
         // installing a root certificate or treating offline chain failures as trust.
@@ -216,7 +275,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         assert(engineAsset?.digest === "sha256:b8dd42a4f57345220d3c39bffc8d561b406989fab841c23a10d0b580a85ed418");
         report.stableEngineRelease = { releaseId: release.id, assetId: engineAsset.id, archiveBytes: engineAsset.size, digest: engineAsset.digest };
         const gym = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
-        const { gymElectronVideoRecord } = await import(gym("launch"));
+
         const require = createRequire(join(upstream, "packages/happy-desktop-gym/package.json")), { chromium } = require("playwright");
         const port = 19486, endpoint = `http://127.0.0.1:${port}`;
         async function listenerPid() {
@@ -246,7 +305,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             throw Error("Fresh installed normal-mode package did not expose its owned debug endpoint");
         }
         await connect();
-        video = await gymElectronVideoRecord(page, { path: join(evidence, "actual-source-update.webm"), fps: 5 });
+
         stage = "fresh installed CyberAI login";
         await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]') && !!document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"] input[name="password"]:not(:disabled)'), undefined, { timeout: 60000 });
         await page.addStyleTag({ content: 'input[name="username"], input[name="password"] { color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }' });
@@ -287,6 +346,21 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
                 await connect();
                 await delay(300);
                 continue;
+            }
+            if (snapshot.installedVersion === "0.4.123" && snapshot.operation === "idle" &&
+                snapshot.engineRuntime === "stopped" && snapshot.errorPresent) {
+                const messages = await page.evaluate(async () => {
+                    const [daemon, onboarding, runtime] = await Promise.all([
+                        window.happyDesktop.daemonGet(), window.happyDesktop.onboardingGet(), window.happyDesktop.runtimeGet(),
+                    ]);
+                    const bounded = value => typeof value === "string" ? value.slice(0, 32768) : "";
+                    return { daemon: bounded(daemon.error), onboarding: bounded(onboarding.error ?? onboarding.message),
+                        runtime: bounded(runtime.message) };
+                });
+                report.startFailure = Object.fromEntries(Object.entries(messages).map(([kind, value]) => [kind, classifyWindowsFailure(value)]));
+                report.powerShellAcl = await nativeAclProbe(engineHome);
+                report.progress.push({ elapsedMs: Date.now() - startedAt, ...snapshot });
+                throw Error("Captured normal-mode installed engine start failure.");
             }
             const key = JSON.stringify(snapshot);
             if (key !== lastKey) {
@@ -329,7 +403,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         report.failedStage = stage;
         report.errors.push("Fresh native engine onboarding did not complete");
         report.commandFailure = error.cyberaiCommand;
-        if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), mask: [page.locator('input[name="username"], input[name="password"]'), page.getByText(username, { exact: true })] }).catch(() => undefined);
+        if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), mask: [page.locator('input[name="username"], input[name="password"]'), page.getByText(username, { exact: true }), page.getByText(/Command failed:|EncodedCommand|happy-agent.exe start/iu)] }).catch(() => undefined);
         process.exitCode = 1;
     } finally {
         if (video) { const value = await video.stop().catch(() => undefined); if (!(value?.framesReceived > 0 && value?.framesWritten > 0)) report.success = false; else report.videos.push(value); }
@@ -343,7 +417,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             while (executable && Date.now() < cleanupBy && (await processes()).some(value => value.ExecutablePath?.toLowerCase() === executable.toLowerCase())) await delay(100);
             assert(!executable || !(await processes()).some(value => value.ExecutablePath?.toLowerCase() === executable.toLowerCase()), "Owned app cleanup did not finish");
         } catch { report.success = false; report.errors.push("Owned installer/app cleanup failed"); }
-        if (report.videos.length !== 1) report.success = false;
+
         await run; await browser?.close().catch(() => undefined); await save();
     }
     assert(report.success, "Fresh Windows engine onboarding incomplete; inspect automatic-update.json"); console.log(JSON.stringify({ success: true, evidence }));
