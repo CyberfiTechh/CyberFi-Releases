@@ -92,7 +92,7 @@ try {
         $report.mode = 'native-update'
         $report.Remove('guiLaunched')
         $report.stage = 'verify-update-ref'
-        if ($env:GITHUB_REF -cne 'refs/heads/main' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
+        if ($env:GITHUB_REF -cne 'refs/heads/codex/windows-stable-130-discovery' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
             throw 'The native update acceptance requires the reviewed Windows main workflow.'
         }
         $report.stage = 'verify-update-target'
@@ -595,7 +595,7 @@ exit 23
                     $sourceEvidence = Join-Path $testRoot 'evidence'
                     if (Test-Path -LiteralPath $sourceEvidence) {
                         $sourceEvidence = (Get-OwnedEntry $sourceEvidence $true).FullName
-                        foreach ($name in 'automatic-update.json', 'actual-source-update.webm', 'actual-auto-reopened-target.webm', 'authenticated-target.png', 'failure.png') {
+                        foreach ($name in 'automatic-update.json', 'actual-source-update.webm', 'actual-auto-reopened-target.webm', 'authenticated-target.png', 'stable-update-offer.png', 'failure.png') {
                             $path = Join-Path $sourceEvidence $name
                             if (Test-Path -LiteralPath $path) {
                                 $item = Get-OwnedEntry $path $false
