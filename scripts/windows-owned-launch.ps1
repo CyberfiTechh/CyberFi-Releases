@@ -89,11 +89,17 @@ try {
         throw 'The runner workspace or temporary directory is unexpected.'
     }
     if ($RunUpdate) {
-        $report.stage = 'verify-reviewed-update-inputs'
-        if ($env:GITHUB_REF -cne 'refs/heads/main' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$' -or
-            $env:ACCEPTANCE_SOURCE_SHA -cnotmatch '^[a-f0-9]{40}$' -or $env:TARGET -cne 'windows' -or $env:ARCH -cne 'x64') {
+        $report.mode = 'native-update'
+        $report.Remove('guiLaunched')
+        $report.stage = 'verify-update-ref'
+        if ($env:GITHUB_REF -cne 'refs/heads/main' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
             throw 'The native update acceptance requires the reviewed Windows main workflow.'
         }
+        $report.stage = 'verify-update-target'
+        if ($env:ACCEPTANCE_SOURCE_SHA -cnotmatch '^[a-f0-9]{40}$' -or $env:TARGET -cne 'windows' -or $env:ARCH -cne 'x64') {
+            throw 'Unexpected native update target or source revision.'
+        }
+        $report.stage = 'verify-update-credentials'
         foreach ($name in 'GH_TOKEN', 'CYBERAI_USERNAME', 'CYBERAI_PASSWORD') {
             $portalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
             [Environment]::SetEnvironmentVariable($name, $null, 'Process')
@@ -102,29 +108,45 @@ try {
             $portalEnvironment.CYBERAI_USERNAME -ieq 'admin' -or $portalEnvironment.CYBERAI_PASSWORD.Length -lt 8) {
             throw 'The native update acceptance requires disposable portal credentials.'
         }
+        $report.stage = 'verify-acceptance-checkout-path'
         $null = Get-OwnedEntry $acceptance $true
         $null = Get-OwnedEntry $PSScriptRoot $true
-        $upstream = (Get-OwnedEntry (Join-Path $workspace 'upstream') $true).FullName
         $updateScript = (Get-OwnedEntry (Join-Path $PSScriptRoot 'verify-cyberai-windows-update.mjs') $false).FullName
-        $git = (Get-Command git.exe -CommandType Application).Source
-        $acceptanceHead = & $git -C $acceptance rev-parse HEAD
+        $report.stage = 'verify-upstream-checkout-path'
+        $upstream = (Get-OwnedEntry (Join-Path $workspace 'upstream') $true).FullName
+        $report.stage = 'resolve-update-git'
+        # Get-Command with a type filter may return several PATH matches.
+        $git = (Get-Command git.exe -CommandType Application | Select-Object -First 1).Source
+        $report.stage = 'verify-acceptance-head'
+        $acceptanceHead = & $git -C $acceptance rev-parse HEAD 2>$null
+        $report.gitExitCode = $LASTEXITCODE
         if ($LASTEXITCODE -ne 0 -or $acceptanceHead -cne $env:GITHUB_SHA) { throw 'Unexpected acceptance revision.' }
-        & $git -C $acceptance diff --quiet HEAD -- scripts/windows-owned-launch.ps1 scripts/verify-cyberai-windows-update.mjs
+        $report.stage = 'verify-acceptance-script-diff'
+        & $git -C $acceptance diff --quiet HEAD -- scripts/windows-owned-launch.ps1 scripts/verify-cyberai-windows-update.mjs 2>$null
+        $report.gitExitCode = $LASTEXITCODE
         if ($LASTEXITCODE -ne 0) { throw 'The reviewed acceptance scripts were modified.' }
-        $upstreamHead = & $git -C $upstream rev-parse HEAD
+        $report.stage = 'verify-upstream-head'
+        $upstreamHead = & $git -C $upstream rev-parse HEAD 2>$null
+        $report.gitExitCode = $LASTEXITCODE
         if ($LASTEXITCODE -ne 0 -or $upstreamHead -cne 'c9feffb54cdb3591220dafced4070e118e3d297a') { throw 'Unexpected upstream revision.' }
-        $node = (Get-OwnedEntry (Get-Command node.exe -CommandType Application).Source $false).FullName
+        $report.Remove('gitExitCode')
+        $report.stage = 'resolve-update-node'
+        $nodeCommand = Get-Command node.exe -CommandType Application | Select-Object -First 1
+        $node = (Get-OwnedEntry $nodeCommand.Source $false).FullName
+        $report.stage = 'verify-node-tool-cache-root'
         $toolRoot = (Get-OwnedEntry $env:RUNNER_TOOL_CACHE $true).FullName
+        $report.stage = 'verify-node-tool-cache-entry'
         if ($node -notmatch ('^' + [regex]::Escape($toolRoot) + '\\node\\24\.\d+\.\d+\\x64\\node\.exe$')) { throw 'Unexpected Node tool cache entry.' }
+        $report.stage = 'verify-update-ffmpeg-entry'
         $ffmpeg = (Get-OwnedEntry $env:HAPPY_DESKTOP_GYM_FFMPEG $false).FullName
+        $report.stage = 'verify-update-ffmpeg-shared-path'
         if (-not ($ffmpeg.StartsWith($workspace + '\', [StringComparison]::OrdinalIgnoreCase) -or
                   $ffmpeg.StartsWith($tempRoot.FullName + '\', [StringComparison]::OrdinalIgnoreCase))) {
             throw 'The native recorder must be in a shared fixture path.'
         }
+        $report.stage = 'create-update-artifact-root'
         $artifactPath = Join-Path $tempRoot.FullName 'cyberfi-windows-owned-evidence'
         $artifactRoot = New-Item -ItemType Directory -Path $artifactPath
-        $report.mode = 'native-update'
-        $report.Remove('guiLaunched')
     }
 
     $report.stage = 'compile-native-preflight'
@@ -499,7 +521,7 @@ exit 23
     }
     for ($cause = $_.Exception; $null -ne $cause; $cause = $cause.InnerException) {
         $type = $cause.GetType().Name
-        if ($type -cin @('ArgumentException', 'ArgumentNullException', 'InvalidCastException', 'InvalidOperationException', 'MethodException', 'MethodInvocationException', 'OutOfMemoryException', 'OverflowException', 'ParameterBindingException', 'ParameterBindingValidationException', 'Win32Exception')) {
+        if ($type -cin @('ArgumentException', 'ArgumentNullException', 'CommandNotFoundException', 'IOException', 'InvalidCastException', 'InvalidOperationException', 'ItemNotFoundException', 'MethodException', 'MethodInvocationException', 'OutOfMemoryException', 'OverflowException', 'ParameterBindingException', 'ParameterBindingValidationException', 'RuntimeException', 'UnauthorizedAccessException', 'Win32Exception')) {
             $report.failureType = $type
         }
         if ($cause -is [ComponentModel.Win32Exception]) { $report.nativeError = $cause.NativeErrorCode; break }
