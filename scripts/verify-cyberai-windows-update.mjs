@@ -99,7 +99,7 @@ async function main() {
     const target = process.env.TARGET;
     assert(target === "windows", "Only Windows update target is supported");
     const windows = target === "windows", arch = target === "macos-arm64" ? "arm64" : "x64";
-    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-stable-130-discovery", "Only the selected disposable native runner may execute acceptance");
+    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-full-update-130", "Only the selected disposable native runner may execute acceptance");
     const pins = Object.fromEntries(Object.entries(REVIEWED_ARTIFACTS).map(([kind, pin]) => [kind, artifactPins(pin)]));
     assert.equal(process.env.ACCEPTANCE_SOURCE_SHA, SOURCE_COMMIT, "Unexpected reviewed source provenance");
     // These lexical variables are never passed to child processes or serialized.
@@ -114,7 +114,7 @@ async function main() {
     const evidence = join(root, "evidence"), applications = join(root, "Applications"); let profile;
     await Promise.all([evidence, applications].map(path => mkdir(path)));
     const report = { success: false, sourceVersion: SOURCE_VERSION, targetVersion: VERSION, sourceCommit: SOURCE_COMMIT,
-        progress: [], events: [], videos: [], errors: [], limits: ["Only the installed source is launched. The test stops after the stable target is offered and does not install it.", "No OS trust-store changes; RSA pins and Authenticode CMS are checked independently."] };
+        progress: [], events: [], videos: [], errors: [], limits: ["Unmodified production NSIS must preserve hidden/debug environment itself; otherwise acceptance fails without a manual target launch.", "No OS trust-store changes; RSA pins and Authenticode CMS are checked independently."] };
     const save = () => writeFile(join(evidence, "automatic-update.json"), JSON.stringify(report, null, 2) + "\n");
     const command = async (file, args, options = {}) => {
         try { return (await exec(file, args, { env: safeEnv, timeout: 120000, windowsHide: true, maxBuffer: 8 * 1024 ** 2, ...options })).stdout.trim(); }
@@ -174,7 +174,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
     }
 
     let executable, runtime, inference, inferenceToken, paths, browser, page, video, run, runResult, runError, watcher, visibilityDone, watcherStop, newPid, verifiedInstaller, stopWatch = false, monitor, monitorError;
-    let stage = "published artifacts", rendererDetached = false, monitorPhase = "process-poll";
+    let stage = "published artifacts", updateArmed = false, rendererDetached = false, monitorPhase = "process-poll";
     const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
     async function processes() {
         const value = await powershell(`@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe','${TARGET_INSTALLER}') } | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Depth 3 -Compress`);
@@ -198,21 +198,24 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         for (const [kind, version] of [["source", SOURCE_VERSION], ["target", VERSION]]) {
             const pin = pins[kind], release = await api(`repos/${REPOSITORY}/releases/${pin.releaseId}`);
             assert(publishedReleaseMatches(release, pin.releaseId, "v" + version), "Both exact Windows releases must be published");
-            if (kind === "target") assert.equal(release.prerelease, false, "The reviewed target must be public stable");
+            if (kind === "target") assert.equal(release.prerelease, false, "Exact target must be public stable");
             const filename = `CyberFi-${version}-x64.exe`, asset = release.assets.find(item => item.id === pin.assetId), manifest = release.assets.find(item => item.id === pin.manifestAssetId);
             assert(asset?.name === filename && asset.digest === "sha256:" + pin.sha256 && asset.state === "uploaded");
             assert(manifest?.name === filename + ".update.json" && manifest.digest === "sha256:" + pin.manifestSha256 && manifest.size <= 4096);
             const path = join(root, filename), manifestPath = path + ".update.json";
-            await download(REPOSITORY, manifest, manifestPath);
-            assert.equal(await hashFile(manifestPath), pin.manifestSha256);
+            await download(REPOSITORY, asset, path); await download(REPOSITORY, manifest, manifestPath);
+            assert.equal(await hashFile(path), pin.sha256); assert.equal(await hashFile(manifestPath), pin.manifestSha256);
             const signed = JSON.parse((await readFile(manifestPath, "utf8")).replace(/^\uFEFF/u, ""));
             assert(signed.sha256 === pin.sha256 && signed.size === asset.size && verify("sha256", Buffer.from(`${version}\n${filename}\n${pin.sha256}\n${asset.size}\n`), PUBLIC_KEY, Buffer.from(signed.signature, "base64")), "Pinned versioned RSA manifest invalid");
-            if (kind === "source") {
-                await download(REPOSITORY, asset, path);
-                assert.equal(await hashFile(path), pin.sha256);
-                artifacts.source = { path, signature: await windowsSignature(path) };
-            } else report.stableTarget = { releaseId: release.id, assetId: asset.id, manifestAssetId: manifest.id, sha256: pin.sha256, signedManifestVerified: true };
+            artifacts[kind] = { path, size: asset.size, signature: await windowsSignature(path) };
         }
+        const extractor = join(environmentValue(safeEnv, "ProgramFiles"), "7-Zip/7z.exe"), referenceOuter = join(root, "target-reference"), referenceApp = join(root, "target-reference-app");
+        await command(extractor, ["x", "-y", artifacts.target.path, "-o" + referenceOuter]);
+        async function findArchive(directory) { const found = []; for (const entry of await readdir(directory, { withFileTypes: true })) { const path = join(directory, entry.name); assert(!(await lstat(path)).isSymbolicLink()); if (entry.isDirectory()) found.push(...await findArchive(path)); else if (entry.name === "app-64.7z") found.push(path); } return found; }
+        const embedded = await findArchive(referenceOuter); assert.equal(embedded.length, 1);
+        await command(extractor, ["x", "-y", embedded[0], "-o" + referenceApp]);
+        const expectedExecutableSha256 = await hashFile(join(referenceApp, "CyberFi.exe"));
+        await windowsSignature(join(referenceApp, "CyberFi.exe"));
         stage = "real source NSIS installation";
         const installation = join(applications, "CyberFi"); await mkdir(installation);
         // Real per-user NSIS installation, not archive extraction. No trust certificate is installed.
@@ -436,18 +439,100 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         assert.equal(await option.count(), 1);
         const label = await option.textContent();
         assert.match(label, /^v0[.]0[.]130(?: · |$)/u);
-        assert.equal(await listenerPid(), oldPid);
-        assert.equal(await powershell(`(Get-Item -LiteralPath ${quote(executable)}).VersionInfo.ProductVersion`), SOURCE_VERSION + ".0");
-        assert(!(await processes()).some(value => value.Name === TARGET_INSTALLER));
-        await page.screenshot({ path: join(evidence, "stable-update-offer.png"), mask: [page.getByText(username, { exact: true })] });
         report.previewUpdatesEnabled = false;
-        report.desktopCheckClicked = true;
-        report.targetOffered = true;
-        report.downloadAndReopenOffered = true;
-        report.targetOptionLabel = label;
-        report.sourceStillRunning = true;
-        report.targetInstallationStarted = false;
-        report.success = true;
+        report.targetOfferLabel = label;
+        await select.selectOption(VERSION);
+        const updateStartedAt = Date.now();
+        const installers = [];
+        monitor = (async () => { while (!stopWatch) {
+            monitorPhase = "process-poll";
+            installers.push(...(await processes()).filter(value => value.Name === TARGET_INSTALLER));
+            if (alive(oldPid) && !rendererDetached) {
+                monitorPhase = "renderer-poll";
+                try { const value = await page.evaluate(async () => { const update = (await window.happyDesktop.runtimeGet()).update, bar = document.querySelector('[role="progressbar"][aria-label="Masaüstü indirmesi"], [role="progressbar"][aria-label="Desktop download"]'), visible = !!bar?.getClientRects().length && getComputedStyle(bar).visibility !== "hidden";
+                    return { status: update.status, fraction: update.downloadedFraction, domPercent: visible ? Number(bar.getAttribute("aria-valuenow")) : null, domText: visible ? bar.parentElement?.innerText : null }; });
+                    if (value.status === "error") throw Object.assign(Error("Production updater returned error"), { cyberfiUpdateFailure: "updater-error" });
+                    const last = report.progress.at(-1);
+                    if (!last || value.status !== last.status || value.fraction !== last.fraction || value.domPercent !== last.domPercent || value.domText !== last.domText)
+                        report.progress.push({ ...value, elapsedMs: Date.now() - updateStartedAt });
+                } catch (error) {
+                    const kind = updateMonitorKind(error, monitorPhase);
+                    report.monitorKind = kind;
+                    if (!updateArmed || kind !== "renderer-closed") throw error;
+                    // Quitting the old app can close CDP before its process exit event.
+                    // Native installer watching continues; every handoff proof below remains mandatory.
+                    rendererDetached = true;
+                    report.rendererClosedBeforeExit = true;
+                }
+            }
+            await delay(100);
+        } })().catch(error => { monitorError = error; report.monitorKind = updateMonitorKind(error, monitorPhase); });
+        const install = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu }); await install.waitFor({ state: "visible", timeout: 15000 });
+        stage = "real GUI download and installer handoff"; updateArmed = true; await install.click(); report.clickedActualGuiButton = true;
+        const until = Date.now() + 12 * 60000; while (!runResult && !runError && !monitorError && Date.now() < until) await delay(100);
+        assert(!monitorError && !runError && runResult?.exitCode === 0, "Actual old app did not complete updater handoff"); await run;
+        const sourceVideo = await video.stop(); video = undefined; assert(sourceVideo.framesReceived > 0 && sourceVideo.framesWritten > 0); report.videos.push(sourceVideo);
+        const installerUntil = Date.now() + 30000;
+        while (!installers.some(value => value.ParentProcessId === oldPid) && Date.now() < installerUntil) await delay(100);
+        const installer = installers.find(value => value.ParentProcessId === oldPid && /--updated/u.test(value.CommandLine ?? "") && /\/S/u.test(value.CommandLine ?? "") && /--force-run/u.test(value.CommandLine ?? ""));
+        assert(installer?.ExecutablePath?.toLowerCase().includes("cyberfi-update-"), "Actual production installer child not observed");
+        assert.equal(await hashFile(installer.ExecutablePath), pins.target.sha256); assert.equal((await stat(installer.ExecutablePath)).size, artifacts.target.size);
+        verifiedInstaller = installer;
+        report.installer = { pid: installer.ProcessId, parentPid: oldPid, sha256: pins.target.sha256, signature: await windowsSignature(installer.ExecutablePath) };
+        const handoffUntil = Date.now() + 180000; let replacement;
+        while (Date.now() < handoffUntil) {
+            const candidates = (await processes()).filter(value => value.Name === "CyberFi.exe" && value.ProcessId !== oldPid && value.ExecutablePath?.toLowerCase() === executable.toLowerCase() && !value.CommandLine?.includes("--type="));
+            assert(candidates.length <= 1); if (candidates.length) { replacement = candidates[0]; break; } await delay(200);
+        }
+        assert(replacement && !alive(oldPid), "No automatically restarted target at owned installation path"); newPid = id(replacement.ProcessId);
+        const replacementOwner = await powershell(`$process=Get-CimInstance Win32_Process -Filter 'ProcessId=${newPid}';$owner=Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid;if($owner.ReturnValue -ne 0){throw 'Could not verify the relaunched owner'};$owner.Sid`);
+        assert.equal(replacementOwner, nativeIdentity.sid, "Automatic relaunch must stay in the same standard user profile");
+        report.automaticRelaunchSameUser = true;
+        const installerExitBy = Date.now() + 180000;
+        while (alive(installer.ProcessId) && Date.now() < installerExitBy) await delay(100);
+        assert(!alive(installer.ProcessId), "Actual app-owned installer did not exit"); report.installer.exitObserved = true;
+        stage = "automatic target endpoint and protected login";
+        await browser.close().catch(() => undefined); await connect(); assert.equal(await listenerPid(), newPid, "Debug listener must belong to automatically launched target");
+        report.automaticRelaunchProfile = { explicitProfileArgument: replacement.CommandLine.includes("--user-data-dir=" + profile), defaultProfileExpected: profile, targetManuallyLaunched: false };
+        const privacy = 'input[name="username"], input[name="password"], [data-happy-desktop-ui="form-row-description"] { color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }'; await page.addStyleTag({ content: privacy });
+        video = await gymElectronVideoRecord(page, { path: join(evidence, "actual-auto-reopened-target.webm"), fps: 5 });
+        const login = page.locator('[data-happy-desktop-ui="cyberfi-account-login"]');
+        await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]') && !!document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"] input[name="password"]:not(:disabled)'), undefined, { timeout: 60000 });
+        await login.waitFor({ state: "visible" });
+        assert(await page.evaluate(async () => { try { await window.happyDesktop.runtimeGet(); return false; } catch { return true; } }), "Target must deny privileged IPC before login");
+        await login.locator('input[name="username"]').fill(username); await login.locator('input[name="password"]').fill(password); assert.equal(await login.getByRole("checkbox", { name: "Beni hatırla" }).isChecked(), false);
+        await login.getByRole("button", { name: "Giriş yap", exact: true }).click();
+        await page.waitForFunction(async () => (await window.happyDesktop.cyberFiAccountGet()).status === "signedIn", undefined, { timeout: 60000 });
+        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).phase === "ready", undefined, { timeout: 90000 });
+        const account = await page.evaluate(() => window.happyDesktop.cyberFiAccountGet()); assert(account.user?.role === "user" && account.remember === false && account.username === username);
+        await assert.rejects(lstat(join(configDir, "cyberai-account.json")), { code: "ENOENT" });
+        const row = page.locator(`[data-happy-desktop-ui="sidebar-item"][data-item-id="local/${project.id}"]`); await row.waitFor({ state: "visible", timeout: 45000 }); await row.click();
+        const tab = page.locator(`[data-happy-desktop-ui="tab"][data-tab-id="${agent.id}"]`); await tab.waitFor({ state: "visible", timeout: 30000 }); await tab.click();
+        await page.getByText("Native CyberAI chat acceptance confirmed.", { exact: true }).first().waitFor({ state: "visible", timeout: 30000 });
+        await page.screenshot({ path: join(evidence, "authenticated-target.png"), mask: [page.getByText(username, { exact: true })] });
+        assert.equal(await powershell(`(Get-Item -LiteralPath ${quote(executable)}).VersionInfo.ProductVersion`), VERSION + ".0"); report.targetSignature = await windowsSignature(executable); assert.equal(await hashFile(executable), expectedExecutableSha256); report.targetExecutableSha256 = expectedExecutableSha256;
+        for (const [path, text] of sentinels) assert.equal(await readFile(path, "utf8"), text);
+        const settings = JSON.parse(await readFile(join(configDir, "config.json"), "utf8")); assert(settings.appearance === "dark" && settings.defaultPermissionMode === "read_only");
+        // Change a real setting through the automatically reopened UI and read
+        // the exact owned default-profile file back; surviving bytes alone do
+        // not prove the replacement is actually using that profile.
+        stage = "automatic target default-profile UI proof";
+        await page.locator('[data-happy-desktop-ui="sidebar-footer"]').getByRole("button", { name: /^(Settings|Ayarlar|Open settings|Ayarları aç)$/iu }).click();
+        const targetGeneral = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await targetGeneral.count()) await targetGeneral.click();
+        for (const mode of ["light", "dark"]) {
+            const theme = page.locator(`[data-happy-desktop-ui="segmented-control-segment"][data-value="${mode}"]`).first(); await theme.waitFor({ state: "visible", timeout: 30000 }); await theme.click();
+            const writeBy = Date.now() + 10000; let persisted;
+            while (Date.now() < writeBy) { persisted = JSON.parse(await readFile(join(configDir, "config.json"), "utf8")); if (persisted.appearance === mode) break; await delay(100); }
+            assert.equal(persisted?.appearance, mode, "Automatic target must write its real UI preference to the exact owned default profile");
+        }
+        report.automaticRelaunchProfile.actualUiWriteReadback = true;
+        await client.getHealth();
+        const percentages = report.progress.filter(value => value.domPercent !== null);
+        assert(percentages.some(value => value.domPercent > 0 && /%\s*\d|\d\s*%/u.test(value.domText ?? "")) && percentages.every((value, index) => Number.isFinite(value.domPercent) && value.domPercent >= 0 && value.domPercent <= 100 && (index === 0 || value.domPercent >= percentages[index - 1].domPercent)), "Visible monotonic production download percentage required");
+        assert(report.progress.some(value => value.status === "downloading" && value.fraction > 0 && value.fraction <= 1));
+        assert.equal(settings.previewUpdatesEnabled, false);
+        report.previewUpdatesEnabledAfterReopen = false;
+        report.actualInstallation = true; report.targetManuallyLaunched = false; report.authenticatedTargetChat = true; report.profilePreserved = true; report.success = true;
     } catch (error) {
         report.failedStage = stage; report.errors.push("Native update acceptance failed"); report.commandFailure = error.cyberaiCommand;
         if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines.windows[2] && error.cyberaiCommand.verb === "start") {
@@ -499,11 +584,11 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             assert(!executable || !(await processes()).some(value => value.ExecutablePath?.toLowerCase() === executable.toLowerCase()), "Owned app cleanup did not finish");
         } catch { report.success = false; report.errors.push("Owned installer/app cleanup failed"); }
         if (watcher) { await writeFile(watcherStop, "stop\n"); report.visibility = await visibilityDone.catch(() => undefined);
-            if (!(report.visibility?.samples > 0 && report.visibility.systemWindowsMax > 0 && report.visibility.pids?.includes(report.oldPid) && report.visibility.onscreenSamples === 0 && report.visibility.activeSamples === 0)) report.success = false; }
-        if (report.videos.length !== 1) report.success = false;
+            if (!(report.visibility?.samples > 0 && report.visibility.systemWindowsMax > 0 && report.visibility.pids?.includes(report.oldPid) && report.visibility.pids?.includes(newPid) && report.visibility.onscreenSamples === 0 && report.visibility.activeSamples === 0)) report.success = false; }
+        if (report.videos.length !== 2) report.success = false;
         await run; await browser?.close().catch(() => undefined); await runtime?.stop(); await new Promise(done => inference ? inference.close(done) : done()); await save();
     }
-    assert(report.success, "Stable Windows update discovery incomplete; inspect automatic-update.json"); console.log(JSON.stringify({ success: true, evidence }));
+    assert(report.success, "Native Windows update incomplete; inspect automatic-update.json"); console.log(JSON.stringify({ success: true, evidence }));
 }
 if (process.argv.includes("--self-test")) {
     assert.deepEqual(sanitizedEnvironment({ CYBERAI_USERNAME: "private", CYBERAI_PASSWORD: "private", GH_TOKEN: "private", NODE_OPTIONS: "unsafe", SystemRoot: "C:\\Windows" }), { SystemRoot: "C:\\Windows" });

@@ -1,5 +1,5 @@
-name: Verify CyberAI stable Windows update discovery
-run-name: CyberAI 129 to 130 stable discovery ${{ inputs.target }}
+name: Verify CyberAI stable Windows download and automatic reopen
+run-name: CyberAI 129 to 130 stable automatic update ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -11,7 +11,7 @@ permissions:
     contents: read
 jobs:
     native:
-        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/windows-stable-130-discovery' && inputs.target == 'windows'
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/windows-full-update-130' && inputs.target == 'windows'
         permissions:
             contents: read # Both pinned source and target must already be public.
         runs-on: windows-2025
@@ -55,7 +55,7 @@ jobs:
                       ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName 'ffmpeg-win64.exe') -ErrorAction SilentlyContinue })
                   if ($ffmpeg.Count -ne 1 -or $ffmpeg[0].PSIsContainer -or ($ffmpeg[0].Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Exactly one owned ffmpeg executable is required' }
                   "HAPPY_DESKTOP_GYM_FFMPEG=$($ffmpeg[0].FullName)" >> $env:GITHUB_ENV
-            - name: Verify stable release offer in the packaged Windows GUI
+            - name: Verify actual Windows GUI download, install and reopen
               working-directory: upstream
               shell: bash
               env:
@@ -70,7 +70,7 @@ jobs:
             - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               if: always()
               with:
-                  name: CyberAI-windows-stable-discovery
+                  name: CyberAI-windows-full-update
                   path: |
                       ${{ runner.temp }}/cyberfi-windows-owned-evidence
                   retention-days: 7
