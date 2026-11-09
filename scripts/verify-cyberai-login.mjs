@@ -143,7 +143,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
     async function api(path) {
         assert.match(path, /^repos\/CyberfiTechh\/(CyberFi-Releases|CyberFi-Engine)\/releases\/[1-9][0-9]*$/u);
         const response = await fetch("https://api.github.com/" + path, { headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: "Bearer " + token } : {}) }, redirect: "error", signal: AbortSignal.timeout(45000) });
-        assert(response.ok, "Pinned GitHub metadata unavailable"); return response.json();
+        assert(response.ok, "Pinned GitHub metadata unavailable: " + response.status); return response.json();
     }
     async function download(repository, asset, destination) {
         assert([REPOSITORY, "CyberfiTechh/CyberFi-Engine"].includes(repository)); id(asset.id);
@@ -152,7 +152,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         for (let redirects = 0; redirects < 5; redirects++) {
             const response = await fetch(url, { headers: { Accept: "application/octet-stream", ...(url.hostname === "api.github.com" && token ? { Authorization: "Bearer " + token } : {}) }, redirect: "manual", signal: AbortSignal.timeout(300000) });
             if ([301, 302, 303, 307, 308].includes(response.status)) { url = allowedRedirect(response.headers.get("location")); continue; }
-            assert(response.ok && response.body, "Pinned asset download unavailable"); let bytes = 0;
+            assert(response.ok && response.body, "Pinned asset download unavailable: " + response.status); let bytes = 0;
             await pipeline(Readable.fromWeb(response.body), new Transform({ transform(chunk, encoding, done) { bytes += chunk.length; done(bytes <= asset.size ? null : Error("Asset exceeded pinned size"), chunk); } }), createWriteStream(destination, { flags: "wx", mode: 0o600 }));
             assert.equal(bytes, asset.size); return;
         }
@@ -195,19 +195,27 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         await run; assert(runResult && !runError, "Owned app exit not observed"); ownedPid = undefined;
     }
     try {
+        stage = "desktop draft metadata";
         const release = await api(`repos/${REPOSITORY}/releases/${pins.releaseId}`);
+        stage = "desktop draft identity";
         assert(release.id === pins.releaseId && release.draft === true && release.tag_name === (windows ? "v" : "macos-v") + VERSION);
         const filename = `CyberFi-${VERSION}-${arch}.${windows ? "exe" : "dmg"}`;
         const asset = release.assets.find(item => item.id === pins.assetId), manifest = release.assets.find(item => item.id === pins.manifestAssetId);
+        stage = "desktop draft asset pins";
         assert(asset?.name === filename && asset.digest === "sha256:" + pins.sha256 && asset.state === "uploaded");
         assert(manifest?.name === filename + ".update.json" && manifest.digest === "sha256:" + pins.manifestSha256 && manifest.size <= 4096);
         const artifact = join(root, filename), manifestFile = artifact + ".update.json";
-        await download(REPOSITORY, asset, artifact); await download(REPOSITORY, manifest, manifestFile);
+        stage = "desktop installer download"; await download(REPOSITORY, asset, artifact);
+        stage = "desktop manifest download"; await download(REPOSITORY, manifest, manifestFile);
+        stage = "desktop asset integrity";
         assert.equal(await hashFile(artifact), pins.sha256); assert.equal(await hashFile(manifestFile), pins.manifestSha256);
+        stage = "desktop manifest RSA verification";
         signedManifest(JSON.parse((await readFile(manifestFile, "utf8")).replace(/^\uFEFF/u, "")), filename, pins.sha256, asset.size);
         if (windows) {
             // Trust is not altered. Verify the pinned Authenticode signer and cryptographic signature.
+            stage = "Windows installer Authenticode";
             report.signature = { installer: await windowsSignature(artifact) };
+            stage = "Windows installer extraction";
             const seven = join(environmentValue(safeEnv, "ProgramFiles"), "7-Zip/7z.exe"), outer = join(root, "nsis"), inner = join(applications, "CyberFi");
             await command(seven, ["x", "-y", artifact, "-o" + outer]);
             const archives = await findFiles(outer, "app-64.7z"); assert.equal(archives.length, 1);
@@ -247,6 +255,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             visibilityDone = new Promise((done, reject) => { watcher.on("error", reject); watcher.on("close", code => code === 0 ? done(JSON.parse(output)) : reject(Error("Visibility watcher failed"))); }); visibilityDone.catch(() => undefined);
             await watcherReady(watcher);
         } else {
+            stage = "macOS disk image verification";
             await command("/usr/bin/hdiutil", ["verify", artifact]); mounted = join(root, "mount"); await mkdir(mounted);
             await command("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mounted, artifact]);
             const bundle = join(mounted, "CyberFi.app"), info = join(bundle, "Contents/Info.plist");
@@ -668,6 +677,8 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         report.errors.push("Native acceptance failed during " + stage);
         report.failureKind = ["Error", "AssertionError", "TimeoutError", "TypeError"].includes(error?.name) ? error.name : "native-error";
         if (typeof error?.code === "string" && /^[A-Z_0-9]{1,64}$/u.test(error.code)) report.failureCode = error.code;
+        const githubStatus = /^(?:Pinned GitHub metadata|Pinned asset download) unavailable: ([1-5][0-9]{2})$/u.exec(error?.message);
+        if (githubStatus) report.githubHttpStatus = Number(githubStatus[1]);
         if (error?.cyberaiCommand) report.commandFailure = error.cyberaiCommand;
         if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines[target][2] && error.cyberaiCommand.verb === "start") {
             let socketToken;
