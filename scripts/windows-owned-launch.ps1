@@ -130,7 +130,7 @@ try {
         $report.mode = 'native-update'
         $report.Remove('guiLaunched')
         $report.stage = 'verify-update-ref'
-        if ($env:GITHUB_REF -cne 'refs/heads/codex/windows-fresh-engine-130' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
+        if ($env:GITHUB_REF -cne 'refs/heads/codex/windows-fresh-engine-131' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
             throw 'The native update acceptance requires the reviewed Windows main workflow.'
         }
         $report.stage = 'verify-update-target'

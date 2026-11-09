@@ -13,10 +13,10 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { EventEmitter } from "node:events";
 
-const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.130";
-const EXPECT_REPRO = true;
+const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.131";
+const EXPECT_REPRO = false;
 const TARGET_INSTALLER = `CyberFi-${VERSION}-x64.exe`;
-const SOURCE_COMMIT = "41b2f60fa0e15ce66883c85a7b14fb05b24aaff3";
+const SOURCE_COMMIT = "d070120ddfdfa8b769e3fcc0b6cacee704306598";
 const exec = promisify(execFile);
 // Independent pinned public update-verification key; never trust a key supplied by the artifact.
 const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA09ZxJMbpq1uFEnz7n52M\nAJtceCXVQCo57lgwMAmizgJaGVGsgsMpzqgCCRgXBN+bPygE+16S9XwYOwHDlnNG\noq8h+bE9Nxce3PzsQHrscdHTT1lGQ/5XwSmvzTvxLdURtQWpaXZl7lJghUnZHNDA\n8SOHbk8rQ+butE82lhcq0C+hgJgHTUqFl9Irppi2O+MpufsZo8PX5jphD4H0aX0k\nB9P+LUreoBmG/L3T3AMZEzQZG606awc/ZMYsJcJkt4xNMjR3ZMz1aWKErW2AXDeY\nyfAo0zmEAUEAFSc3UEJRnmBAjorVA3C/rHJzYP7QabSh8ORLOUrqQYgqCpTLETpf\nct0J+NphCLuBGNQ5IeId5IPiBNZlKynGzP/HK+oJTvJ31hTHIiaA+5pfIESXELIZ\nJ5awYGW0y7fii0CqRGwFMJnU829APVvAC9LJUzSSz7NP+2rmc/boYInx8cjN2/LO\nLI9HsPvON+oxM4MhjRxDd4CVoKDpI+rB2TthSdfxt3UxAgMBAAE=\n-----END PUBLIC KEY-----";
@@ -77,18 +77,18 @@ function missingOwnedKeychainDefaultConfirmed(defaults, list, reads) {
 }
 const REVIEWED_ARTIFACTS = {
     "target": {
-        "releaseId": 439205189,
-        "assetId": 727697340,
-        "sha256": "9f35e06f2b1373fbf5b6dfea31556fbb76bf3ba48de0e71b37ad84790a6b45b7",
-        "manifestAssetId": 727719443,
-        "manifestSha256": "40fd8299eefbd46aeee35f41200336aac49b5f3b38de3901d1845aa471e02462"
+        "releaseId": 439264052,
+        "assetId": 727864145,
+        "sha256": "b091452750eed8702c45e21c3d97df9e4e3f02a38db0a372104cdef2a0c79374",
+        "manifestAssetId": 727881614,
+        "manifestSha256": "3d0a47f49e500b90ac1c1709d95fc21f130ebd08a9fa8494a0b68762cbc5b1ab"
     }
 };
 async function main() {
     const target = process.env.TARGET;
     assert(target === "windows", "Only Windows update target is supported");
     const windows = target === "windows", arch = target === "macos-arm64" ? "arm64" : "x64";
-    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-fresh-engine-130", "Only the selected disposable native runner may execute acceptance");
+    assert(process.platform === (windows ? "win32" : "darwin") && process.arch === arch && process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted" && process.env.GITHUB_REPOSITORY === REPOSITORY && process.env.GITHUB_REF === "refs/heads/codex/windows-fresh-engine-131", "Only the selected disposable native runner may execute acceptance");
     const pins = Object.fromEntries(Object.entries(REVIEWED_ARTIFACTS).map(([kind, pin]) => [kind, artifactPins(pin)]));
     assert.equal(process.env.ACCEPTANCE_SOURCE_SHA, SOURCE_COMMIT, "Unexpected reviewed source provenance");
     // These lexical variables are never passed to child processes or serialized.
@@ -187,8 +187,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         const artifacts = {};
         for (const [kind, version] of [["target", VERSION]]) {
             const pin = pins[kind], release = await api(`repos/${REPOSITORY}/releases/${pin.releaseId}`);
-            assert(publishedReleaseMatches(release, pin.releaseId, "v" + version), "Both exact Windows releases must be published");
-            if (kind === "target") assert.equal(release.prerelease, false, "The reviewed target must be public stable");
+            assert(release.id === pin.releaseId && release.tag_name === "v" + version && release.draft === true, "Exact signed Windows draft is required");
             const filename = `CyberFi-${version}-x64.exe`, asset = release.assets.find(item => item.id === pin.assetId), manifest = release.assets.find(item => item.id === pin.manifestAssetId);
             assert(asset?.name === filename && asset.digest === "sha256:" + pin.sha256 && asset.state === "uploaded");
             assert(manifest?.name === filename + ".update.json" && manifest.digest === "sha256:" + pin.manifestSha256 && manifest.size <= 4096);
@@ -197,13 +196,13 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             assert.equal(await hashFile(manifestPath), pin.manifestSha256);
             const signed = JSON.parse((await readFile(manifestPath, "utf8")).replace(/^\uFEFF/u, ""));
             assert(signed.sha256 === pin.sha256 && signed.size === asset.size && verify("sha256", Buffer.from(`${version}\n${filename}\n${pin.sha256}\n${asset.size}\n`), PUBLIC_KEY, Buffer.from(signed.signature, "base64")), "Pinned versioned RSA manifest invalid");
-            if (kind === "target") {
+            {
                 await download(REPOSITORY, asset, path);
                 assert.equal(await hashFile(path), pin.sha256);
                 artifacts.target = { path, signature: await windowsSignature(path) };
             }
         }
-        stage = "real stable 0.0.130 NSIS installation";
+        stage = "real signed 0.0.131 draft NSIS installation";
         const installation = join(applications, "CyberFi"); await mkdir(installation);
         // Real per-user NSIS installation, not archive extraction. No trust certificate is installed.
         await command(artifacts.target.path, ["/S", "/D=" + installation], { timeout: 180000 });
@@ -313,7 +312,8 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         } else {
             assert(snapshot?.runtimePhase === "ready" && snapshot.runningVersion === "0.4.123" &&
                 snapshot.engineRuntime === "ready" && snapshot.installedVersion === "0.4.123", "Real first-run engine never became ready");
-            assert(report.progress.some(row => row.installation === "missing" || row.operation === "downloading"), "No first-run transition was observed");
+            assert(report.progress.some(row => row.installation === "missing"), "No first-run missing engine state was observed");
+            assert(report.progress.some(row => row.operation === "downloading" && row.download?.bytes > 0), "No measured engine download was observed");
             stage = "native engine binary and real renderer readiness";
             const binary = await lstat(engine);
             assert(binary.isFile() && !binary.isSymbolicLink());
