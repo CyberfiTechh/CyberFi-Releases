@@ -180,6 +180,44 @@ $full=[Security.AccessControl.FileSystemRights]::FullControl
         return { onlyReadAccess: true, states, daemonLog, daemonLogBytes: file?.size ?? 0 };
     }
 
+        const aclInitializer = [
+            "$ErrorActionPreference = 'Stop'",
+            "$target = Get-Item -LiteralPath $env:HAPPY_PRIVATE_DIRECTORY -Force",
+            "if (($target.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Private state cannot be a reparse point.' }",
+            "$identity = [Security.Principal.WindowsIdentity]::GetCurrent().User",
+            "$acl = [Security.AccessControl.DirectorySecurity]::new()",
+            "$acl.SetOwner($identity)",
+            "$acl.SetAccessRuleProtection($true, $false)",
+            "foreach ($sid in @($identity, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) { $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')) }",
+            "$target.SetAccessControl($acl)",
+        ].join("\n");
+    async function runFreshAclInitializer(nativeHome, standardTemp) {
+        const probeRoot = join(nativeHome, "cyberfi-synthetic-acl-probe");
+        await assert.rejects(lstat(probeRoot), { code: "ENOENT" });
+        await mkdir(probeRoot);
+        assert.equal((await realpath(probeRoot)).toLowerCase(), probeRoot.toLowerCase());
+        let result = [];
+        for (const kind of ["launcher-temp", "ordinary-profile-temp"]) {
+            const directory = join(probeRoot, kind);
+            await mkdir(directory);
+            assert.equal((await realpath(directory)).toLowerCase(), directory.toLowerCase());
+            const env = { ...safeEnv, HAPPY_PRIVATE_DIRECTORY: directory };
+            if (kind === "ordinary-profile-temp") { env.TEMP = standardTemp; env.TMP = standardTemp; }
+            const begin = Date.now();
+            try {
+                const completed = await exec(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                    Buffer.from(aclInitializer, "utf16le").toString("base64")],
+                    { env, timeout: 30000, maxBuffer: 16384, windowsHide: true });
+                result.push({ kind, exitCode: 0, elapsedMs: Date.now() - begin, timedOut: false,
+                    stdoutBytes: Buffer.byteLength(completed.stdout), stderr: classifyWindowsFailure(completed.stderr) });
+            } catch (error) {
+                result.push({ kind, exitCode: Number.isSafeInteger(error.code) ? error.code : null, elapsedMs: Date.now() - begin,
+                    timedOut: error.killed === true, signal: /^SIG[A-Z0-9]+$/u.test(error.signal ?? "") ? error.signal : null,
+                    stderr: classifyWindowsFailure(error.stderr ?? error.message) });
+            }
+        }
+        return result;
+    }
     async function windowsSignature(path) {
         // Check the actual embedded Authenticode CMS cryptographically without
         // installing a root certificate or treating offline chain failures as trust.
@@ -243,6 +281,25 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         report.profileInitiallyAbsent = true;
         report.engineInitiallyAbsent = true;
         report.normalPackagedMode = true;
+        stage = "exact owned PowerShell ACL initializer probe";
+        const localAppData = await realpath(environmentValue(safeEnv, "LOCALAPPDATA"));
+        assert.equal(localAppData.toLowerCase(), join(nativeHome, "AppData", "Local").toLowerCase());
+        const standardTemp = join(localAppData, "Temp");
+        await mkdir(standardTemp, { recursive: true });
+        const standardTempEntry = await lstat(standardTemp);
+        assert(standardTempEntry.isDirectory() && !standardTempEntry.isSymbolicLink());
+        assert.equal((await realpath(standardTemp)).toLowerCase(), standardTemp.toLowerCase());
+        const launcherTemp = environmentValue(safeEnv, "TEMP");
+        assert(launcherTemp.toLowerCase().endsWith("\\tmp") && launcherTemp.toLowerCase().includes("\\cf-launch-"));
+        const canonicalModulePath = nativePsEnvironment.PSModulePath;
+        report.launchEnvironmentClassification = {
+            launcherTempIsSeparateOwnedScratch: launcherTemp.toLowerCase() !== standardTemp.toLowerCase(),
+            appUsesOrdinarySyntheticUserTemp: true,
+            launcherModulePathMatchesNativeSystemModules: environmentValue(safeEnv, "PSModulePath").toLowerCase() === canonicalModulePath.toLowerCase(),
+            sandboxOverrideSuppliedToApp: false,
+        };
+        report.exactNativeAclProbe = await runFreshAclInitializer(nativeHome, standardTemp);
+
         const artifacts = {};
         for (const [kind, version] of [["target", VERSION]]) {
             const pin = pins[kind], release = await api(`repos/${REPOSITORY}/releases/${pin.releaseId}`);
@@ -283,7 +340,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             const values = text ? JSON.parse(text) : [], list = Array.isArray(values) ? values : [values]; assert(list.length <= 1); return list.length ? id(list[0]) : undefined;
         }
         assert.equal(await listenerPid(), undefined);
-        const env = { ...safeEnv, HAPPY_DESKTOP_DEBUG: "1", HAPPY_DEBUG_RENDERER_PORT: String(port) };
+        const env = { ...safeEnv, TEMP: standardTemp, TMP: standardTemp, HAPPY_DESKTOP_DEBUG: "1", HAPPY_DEBUG_RENDERER_PORT: String(port) };
         for (const key of Object.keys(env)) {
             if (/^(?:HAPPY_|ELECTRON_|CYBERFI_|PDR_)/iu.test(key) &&
                 !["HAPPY_DESKTOP_DEBUG", "HAPPY_DEBUG_RENDERER_PORT", "HAPPY_DESKTOP_GYM_FFMPEG"].includes(key)) delete env[key];
