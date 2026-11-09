@@ -348,7 +348,21 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         report.accountAuthenticated = true;
         report.appPid = id(await listenerPid());
         stage = "normal first-run engine preparing and download";
-        const startedAt = Date.now(), end = startedAt + (EXPECT_REPRO ? 90_000 : 9 * 60000);
+        engine = join(engineHome, ".happy", "dist", "version", ENGINE_VERSION, "happy-agent.exe");
+        const daemonPidFile = join(engineHome, ".happy", "agent", "daemon.pid");
+        const daemonPid = async () => {
+            try {
+                const file = await lstat(daemonPidFile);
+                assert(file.isFile() && !file.isSymbolicLink() && file.size <= 32);
+                const value = (await readFile(daemonPidFile, "utf8")).trim();
+                return /^[1-9][0-9]{0,9}$/u.test(value) ? id(Number(value)) : null;
+            } catch (error) {
+                if (error.code !== "ENOENT") throw error;
+                return null;
+            }
+        };
+        const startedAt = Date.now(), end = startedAt + (EXPECT_REPRO ? 90_000 : 5 * 60000);
+        const failuresSeen = new Set();
         let lastKey, snapshot, waitingSince;
         while (Date.now() < end) {
             try {
@@ -373,6 +387,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
                 await delay(300);
                 continue;
             }
+            snapshot.daemonPid = await daemonPid();
             if (snapshot.installedVersion === ENGINE_VERSION && snapshot.operation === "idle" &&
                 snapshot.engineRuntime === "stopped" && snapshot.errorPresent) {
                 const messages = await page.evaluate(async () => {
@@ -383,10 +398,13 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
                     return { daemon: bounded(daemon.error), onboarding: bounded(onboarding.error ?? onboarding.message),
                         runtime: bounded(runtime.message) };
                 });
-                report.startFailure = Object.fromEntries(Object.entries(messages).map(([kind, value]) => [kind, classifyWindowsFailure(value)]));
-                report.powerShellAcl = await nativeAclProbe(engineHome);
-                report.progress.push({ elapsedMs: Date.now() - startedAt, ...snapshot });
-                throw Error("Captured normal-mode installed engine start failure.");
+                const failureKey = hash(JSON.stringify(messages));
+                if (!failuresSeen.has(failureKey)) {
+                    failuresSeen.add(failureKey);
+                    const classified = Object.fromEntries(Object.entries(messages).map(([kind, value]) => [kind, classifyWindowsFailure(value)]));
+                    report.startFailure ??= classified;
+                    (report.startFailures ??= []).push({ elapsedMs: Date.now() - startedAt, ...classified });
+                }
             }
             const key = JSON.stringify(snapshot);
             if (key !== lastKey) {
@@ -402,7 +420,6 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
                 snapshot.engineRuntime === "ready" && snapshot.installedVersion === ENGINE_VERSION) break;
             await delay(700);
         }
-        engine = join(engineHome, ".happy", "dist", "version", ENGINE_VERSION, "happy-agent.exe");
         if (EXPECT_REPRO) {
             assert(waitingSince !== undefined && Date.now() - waitingSince >= 25_000, "Known preparing stall was not reproduced");
             await assert.rejects(lstat(engine), { code: "ENOENT" });
@@ -410,6 +427,8 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             report.preparingStallDurationMs = Date.now() - waitingSince;
             await page.screenshot({ path: join(evidence, "fresh-engine-preparing.png"), mask: [page.getByText(username, { exact: true })] });
         } else {
+            if (snapshot?.runtimePhase !== "ready" && report.startFailure)
+                report.powerShellAcl = await nativeAclProbe(engineHome);
             assert(snapshot?.runtimePhase === "ready" && snapshot.runningVersion === ENGINE_VERSION &&
                 snapshot.engineRuntime === "ready" && snapshot.installedVersion === ENGINE_VERSION, "Real first-run engine never became ready");
             assert(report.progress.some(row => row.installation === "missing"), "No first-run missing engine state was observed");
@@ -418,6 +437,10 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
             const binary = await lstat(engine);
             assert(binary.isFile() && !binary.isSymbolicLink());
             assert.equal((await realpath(engine)).toLowerCase(), engine.toLowerCase());
+            const pid = id(snapshot.daemonPid ?? await daemonPid());
+            const runningPath = await powershell(`(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').ExecutablePath`);
+            assert.equal(runningPath.toLowerCase(), engine.toLowerCase());
+            report.runningEnginePid = pid;
             assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), ENGINE_VERSION);
             report.installedEngineSha256 = await hashFile(engine);
             report.desktopConnected = true;
