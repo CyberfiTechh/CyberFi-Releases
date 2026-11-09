@@ -13,15 +13,15 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { EventEmitter } from "node:events";
 
-const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.128";
-const SOURCE_COMMIT = "a90b7531455ad651cd0b2667cf40a4d37aaf84e3";
+const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.129";
+const SOURCE_COMMIT = "b4c6aa448381907d0a6459886a91f1800b92236a";
 const exec = promisify(execFile);
 // Independent pinned public update-verification key; never trust a key supplied by the artifact.
 const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA09ZxJMbpq1uFEnz7n52M\nAJtceCXVQCo57lgwMAmizgJaGVGsgsMpzqgCCRgXBN+bPygE+16S9XwYOwHDlnNG\noq8h+bE9Nxce3PzsQHrscdHTT1lGQ/5XwSmvzTvxLdURtQWpaXZl7lJghUnZHNDA\n8SOHbk8rQ+butE82lhcq0C+hgJgHTUqFl9Irppi2O+MpufsZo8PX5jphD4H0aX0k\nB9P+LUreoBmG/L3T3AMZEzQZG606awc/ZMYsJcJkt4xNMjR3ZMz1aWKErW2AXDeY\nyfAo0zmEAUEAFSc3UEJRnmBAjorVA3C/rHJzYP7QabSh8ORLOUrqQYgqCpTLETpf\nct0J+NphCLuBGNQ5IeId5IPiBNZlKynGzP/HK+oJTvJ31hTHIiaA+5pfIESXELIZ\nJ5awYGW0y7fii0CqRGwFMJnU829APVvAC9LJUzSSz7NP+2rmc/boYInx8cjN2/LO\nLI9HsPvON+oxM4MhjRxDd4CVoKDpI+rB2TthSdfxt3UxAgMBAAE=\n-----END PUBLIC KEY-----";
 const engines = {
-    windows: [725557365, "bb54f1d46d3defe4c7678d40729d8952eb44936ca306718c58e0ebf047ae1ab9", "happy-agent-win32-x64.exe"],
-    "macos-x64": [725559913, "b74ad8a1cf98d6dda75cb48601c28e4cd265e4a50614cc1d166684ef56e610d8", "happy-agent-darwin-x64"],
-    "macos-arm64": [725559914, "20d3c971c7a2f7c044d7dcbd5c276e13de339310a9fd8e904f9d3ccd46e50690", "happy-agent-darwin-arm64"],
+    windows: [726698511, "34f5b5e058359294968d6b06a14c21e5e3ce9997ada2a6d9b1ca49ede5b8e79a", "happy-agent-win32-x64.exe"],
+    "macos-x64": [726727018, "a5e482bc4d4613f2373adbca3b75d8a90e9d86513ee544350253e723708e8345", "happy-agent-darwin-x64"],
+    "macos-arm64": [726727021, "4e45d42b8206375e44ceb332047162d8ffe28f168f9e4f024a9a16c7d5ef4933", "happy-agent-darwin-arm64"],
 };
 const id = value => { assert(Number.isSafeInteger(value) && value > 0); return value; };
 const sha = value => { assert(typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)); return value; };
@@ -265,8 +265,8 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         }
         report.binaryIdentity = { rsaVerified: true, executableSha256: await hashFile(executable), quarantineModified: false, fusesModified: false };
         stage = "owned engine fixture";
-        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438601789"), [engineId, engineSha, engineName] = engines[target];
-        assert(engineRelease.tag_name === "v0.4.120" && !engineRelease.draft && !engineRelease.prerelease);
+        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/438867783"), [engineId, engineSha, engineName] = engines[target];
+        assert(engineRelease.tag_name === "v0.4.121-preview.1" && !engineRelease.draft && engineRelease.prerelease === true);
         const engineAsset = engineRelease.assets.find(item => item.id === engineId); assert.equal(engineAsset?.digest, "sha256:" + engineSha);
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
         stage = "owned engine archive download";
@@ -279,7 +279,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         assert.equal(await command(tar, ["-tzf", archive]), engineName); await command(tar, ["-xzf", archive, "-C", engineRoot]);
         const engine = join(engineRoot, engineName); process.env.HAPPY_DESKTOP_AGENT_EXECUTABLE = engine;
         stage = "owned engine version verification";
-        assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.120");
+        assert.equal((await command(engine, ["--version"])).split(/\s+/u).at(-1), "0.4.121-preview.1");
         stage = "upstream gym import and isolated paths";
         const gym = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
         const { gymElectronProcessRun, gymElectronVideoRecord } = await import(gym("launch"));
@@ -293,19 +293,19 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const { happyAgentBinarySelected } = await import(desktopMain("happyAgentBinaryConfig"));
         const { happyAgentReleaseInstall } = await import(desktopMain("happyAgentRelease"));
         const cachePaths = happyDaemonPaths({ HAPPY_HOME_DIR: paths.happyHome }, paths.home);
-        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.120");
+        const cachedEngine = happyAgentBinaryPath(cachePaths, "0.4.121-preview.1");
         assert(cachedEngine.startsWith(paths.root + sep) && cachePaths.binaryConfigPath.startsWith(paths.root + sep));
         await mkdir(dirname(cachedEngine), { recursive: true, mode: 0o700 });
         await copyFile(engine, cachedEngine, constants.COPYFILE_EXCL); await chmod(cachedEngine, 0o700);
         const extractedBinarySha = await hashFile(engine); assert.equal(await hashFile(cachedEngine), extractedBinarySha);
         // Consume verified cached bytes through the normal lock/data-floor/
         // atomic-selection producer. No fetch interception or forged status.
-        const installed = await happyAgentReleaseInstall({ version: "0.4.120", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
-        assert(installed.version === "0.4.120" && installed.path === cachedEngine);
+        const installed = await happyAgentReleaseInstall({ version: "0.4.121-preview.1", archivedBinaryName: engineName, asset: engineAsset }, cachePaths);
+        assert(installed.version === "0.4.121-preview.1" && installed.path === cachedEngine);
         assert.deepEqual(await happyAgentBinarySelected(cachePaths), installed);
-        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.120");
+        assert.equal((await command(cachedEngine, ["--version"])).split(/\s+/u).at(-1), "0.4.121-preview.1");
         const cacheConfig = JSON.parse(await readFile(cachePaths.binaryConfigPath, "utf8"));
-        assert.deepEqual(cacheConfig, { downloadedVersions: ["0.4.120"], selectedVersion: "0.4.120" });
+        assert.deepEqual(cacheConfig, { downloadedVersions: ["0.4.121-preview.1"], selectedVersion: "0.4.121-preview.1" });
         report.managedEnginePrecondition = { producer: "pinned upstream happyAgentReleaseInstall consuming verified cached bytes", version: installed.version, executableSha256: extractedBinarySha, config: cacheConfig, fetchOverridden: false, dataVersionFabricated: false };
         inferenceToken = randomBytes(24).toString("hex"); let inferenceCalls = 0;
         inference = createServer(async (request, response) => {
@@ -431,7 +431,9 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         while (Date.now() < healthDeadline) {
             try { client = happyAgentClientCreate(paths.socketPath, (await readFile(paths.tokenPath, "utf8")).trim()); await client.getHealth(); break; } catch { client = undefined; await delay(150); }
         }
-        assert(client, "Fixture engine health unavailable"); stage = "synthetic workspace chat fixture";
+        assert(client, "Fixture engine health unavailable");
+        assert.equal((await client.getHealth()).version.daemon, installed.version);
+        stage = "synthetic workspace chat fixture";
         const fixtureClient = new GymHappyAgentClient(paths.socketPath, (await readFile(paths.tokenPath, "utf8")).trim());
         const repository = join(paths.projects, "native-login-chat"); await mkdir(repository);
         const gitEnv = { ...systemEnv, ...gymHostEnvironment(paths), GIT_CONFIG_GLOBAL: windows ? "NUL" : "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
@@ -658,7 +660,7 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--keychain" 
         assert.equal(sockets.size, 0); report.logoutTransportProof = observedSockets ? "Observed workspace WebSockets closed and old document destroyed" : "Old workspace document destroyed; no WebSocket was observed";
         await page.screenshot({ path: join(evidence, "logout.png"), mask: [login().locator('input[name="username"], input[name="password"]')] });
         for (const [path, text] of sentinels) assert.equal(await readFile(path, "utf8"), text);
-        await client.getHealth(); report.checks.forcedLogoutReload = true; report.checks.savedCredentialRemoved = true; report.checks.profileAndSkillsPreserved = true; report.checks.engineStillHealthy = true;
+        assert.equal((await client.getHealth()).version.daemon, installed.version); report.checks.forcedLogoutReload = true; report.checks.savedCredentialRemoved = true; report.checks.profileAndSkillsPreserved = true; report.checks.engineStillHealthy = true;
         report.inferenceFixture = { localOnly: true, calls: inferenceCalls, externalProviderCalls: 0 };
         await endVideo(); await stopOwned(); report.success = true;
     } catch (error) {
@@ -751,6 +753,6 @@ if (process.argv.includes("--self-test")) {
     assert(matchesRule(rule));
     for (const record of [null, { ...rule, status: "candidate" }, { ...rule, origin: "manual" }, { ...rule, scope: { type: "chat" } },
         { ...rule, source: { ...rule.source, chatId: "other-chat" } }, { ...rule, source: { ...rule.source, messageId: "" } }]) assert(!matchesRule(record));
-    assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.128-x64.exe", pin.sha256, 10));
+    assert.throws(() => signedManifest({ sha256: pin.sha256, size: 10, signature: "A".repeat(512) }, "CyberFi-0.0.129-x64.exe", pin.sha256, 10));
     console.log("Strict artifact pins, redirect refusal, independent RSA refusal, credential environment isolation and synthetic memory matching passed. No app or network used.");
 } else await main();
