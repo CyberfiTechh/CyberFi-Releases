@@ -1,5 +1,5 @@
 name: Verify CyberAI published native automatic update
-run-name: CyberAI 129 to 130 automatic update ${{ inputs.target }}
+run-name: CyberAI 130 stable discovery with previews off ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -62,6 +62,7 @@ jobs:
                   TARGET: ${{ inputs.target }}
                   ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
                   ACCEPTANCE_SOURCE_SHA: 41b2f60fa0e15ce66883c85a7b14fb05b24aaff3
+                  ACCEPTANCE_STABLE_DISCOVERY_ONLY: "1"
                   GH_TOKEN: ${{ github.token }}
                   CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI125_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
                   CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI125_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}

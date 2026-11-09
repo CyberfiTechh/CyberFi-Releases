@@ -115,6 +115,7 @@ async function main() {
     assert.equal(process.env.ACCEPTANCE_SOURCE_SHA, SOURCE_COMMIT, "Unexpected reviewed target source provenance");
     const arch = process.env.ARCH;
     assert((arch === "x64" || arch === "arm64") && process.arch === arch);
+    const discoveryOnly = process.env.ACCEPTANCE_STABLE_DISCOVERY_ONLY === "1";
     const pins = artifactPins(REVIEWED_ARTIFACTS[arch]);
     const upstream = await realpath(process.argv[2]);
     assert.equal(upstream, join(resolve(process.env.GITHUB_WORKSPACE), "upstream"));
@@ -173,6 +174,7 @@ async function main() {
             report.stage = kind === "source" ? "published source metadata" : "published target metadata";
             const pin = pins[kind], release = await api(`repos/${REPOSITORY}/releases/${pin.releaseId}`);
             assert(publishedReleaseMatches(release, pin.releaseId, "macos-v" + version));
+            if (discoveryOnly && kind === "target") assert.equal(release.prerelease, false, "Exact target must be a stable release");
             const filename = `CyberFi-${version}-${arch}.dmg`;
             const asset = release.assets.find(item => item.id === pin.assetId);
             const manifest = release.assets.find(item => item.id === pin.manifestAssetId);
@@ -262,7 +264,8 @@ async function main() {
         await runtime.client.waitForAgentIdle(agent.id, submission.runId, 60000); assert(inferenceCalls > 0);
         const configDir = join(profile, "desktop"); await mkdir(configDir);
         await writeFile(join(configDir, "local-onboarding.json"), JSON.stringify({ version: 3, chiefOfStaffSetup: true }));
-        await writeFile(join(configDir, "config.json"), JSON.stringify({ appearance: "dark", defaultPermissionMode: "read_only" }));
+        const configPath = join(configDir, "config.json");
+        await writeFile(configPath, JSON.stringify({ appearance: "dark", defaultPermissionMode: "read_only", ...(discoveryOnly ? { previewUpdatesEnabled: false } : {}) }));
         const settingsNote = join(configDir, "retained-user-note.txt"), skillsNote = join(paths.home, ".agents/skills/acceptance-retained/SKILL.md");
         await mkdir(dirname(skillsNote), { recursive: true });
         const sentinels = [[settingsNote, "Keep the existing desktop profile.\n"], [skillsNote, "# Existing user skill\nKeep this exact text.\n"]];
@@ -335,8 +338,37 @@ async function main() {
         await page.locator('[data-happy-desktop-ui="sidebar-footer"]').getByRole("button", { name: /^(Settings|Ayarlar|Open settings|Ayarları aç)$/iu }).click();
         const general = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await general.count()) await general.click();
         const select = page.locator("#cyberfi-settings-desktop-version"); await select.waitFor({ state: "visible", timeout: 60000 });
+        const preview = page.locator('#happy-agent-settings-preview-updates[role="switch"]');
+        if (discoveryOnly) {
+            await preview.waitFor({ state: "visible" });
+            assert.equal(await preview.getAttribute("aria-checked"), "false");
+            assert.equal(JSON.parse(await readFile(configPath, "utf8")).previewUpdatesEnabled, false);
+            assert.equal(await page.evaluate(async () => (await window.happyDesktop.desktopConfigGet()).previewUpdatesEnabled), false);
+        }
         await page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/iu }).first().click();
         await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(item => item.version === "0.0.130"), undefined, { timeout: 45000 });
+        if (discoveryOnly) {
+            report.stage = "stable discovery with preview updates disabled";
+            await page.waitForFunction(async () => {
+                const update = (await window.happyDesktop.runtimeGet()).update;
+                return update?.status === "available" && update.availableVersion === "0.0.130";
+            }, undefined, { timeout: 45000 });
+            await select.locator('option[value="0.0.130"]').waitFor({ state: "attached" });
+            assert.equal(await preview.getAttribute("aria-checked"), "false");
+            assert.equal(JSON.parse(await readFile(configPath, "utf8")).previewUpdatesEnabled, false);
+            assert.equal(await page.evaluate(async () => (await window.happyDesktop.desktopConfigGet()).previewUpdatesEnabled), false);
+            await select.selectOption("0.0.130");
+            assert.equal(await select.inputValue(), "0.0.130");
+            await select.screenshot({ path: join(evidence, "stable-desktop-version.png") });
+            await preview.screenshot({ path: join(evidence, "preview-disabled.png") });
+            assert.equal(await command("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", join(app, "Contents/Info.plist")]), "0.0.129");
+            assert.equal(await listenerPid(), oldPid);
+            report.stableDiscovery = { targetReleaseId: pins.target.releaseId, availableVersion: "0.0.130", releasePrerelease: false, previewSwitchChecked: false, persistedPreviewUpdatesEnabled: false, runtimePreviewUpdatesEnabled: false, sourceStillRunning: true, installedUpdate: false };
+            report.sourceVideo = await video.stop(); video = undefined;
+            assert(report.sourceVideo.framesReceived > 0 && report.sourceVideo.framesWritten > 0);
+            report.success = true;
+            return;
+        }
         await select.selectOption("0.0.130");
         const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu }); await button.waitFor({ state: "visible" });
         let ticket, ready, stagePath, oldExitObserved = false;
@@ -471,11 +503,16 @@ async function main() {
         if (appRun) { const closed = await Promise.race([appRun.then(() => true), delay(10000).then(() => false)]); if (!closed) report.success = false; }
         if (observer) {
             report.visibility = await observer().catch(() => ({ error: "Native observer failed" }));
-            if (!(report.visibility.systemWindowsMax > 0 && report.visibility.pids?.includes(report.oldPid) && report.visibility.pids?.includes(newPid) && report.visibility.policySamplesByPid?.[String(report.oldPid)] > 0 && report.visibility.policySamplesByPid?.[String(newPid)] > 0 && report.visibility.onscreenSamples === 0 && report.visibility.activeSamples === 0)) report.success = false;
+            const pids = discoveryOnly ? [report.oldPid] : [report.oldPid, newPid];
+            if (!(report.visibility.systemWindowsMax > 0 && pids.every(pid => report.visibility.pids?.includes(pid) && report.visibility.policySamplesByPid?.[String(pid)] > 0) && report.visibility.onscreenSamples === 0 && report.visibility.activeSamples === 0)) report.success = false;
         }
         await runtime?.stop(); await inferenceStop?.().catch(() => undefined);
         await save();
         for (const mount of mounts.reverse()) await command("/usr/bin/hdiutil", ["detach", mount]).catch(() => undefined);
+        if (discoveryOnly) {
+            assert(report.success, "Stable discovery evidence incomplete; inspect automatic-update.json");
+            console.log(JSON.stringify({ success: true, stableDiscovery: report.stableDiscovery, evidence }));
+        }
     }
     assert(report.success, "Automatic update evidence incomplete; inspect automatic-update.json");
     console.log(JSON.stringify({ success: report.success, source: report.sourceVersion, target: report.targetVersion, receipt: report.receipt, evidence }));
