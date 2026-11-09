@@ -13,8 +13,9 @@ import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { EventEmitter } from "node:events";
 
-const REPOSITORY = "CyberfiTechh/CyberFi-Releases", VERSION = "0.0.128";
-const SOURCE_COMMIT = "a90b7531455ad651cd0b2667cf40a4d37aaf84e3";
+const REPOSITORY = "CyberfiTechh/CyberFi-Releases", SOURCE_VERSION = "0.0.128", VERSION = "0.0.129";
+const TARGET_INSTALLER = `CyberFi-${VERSION}-x64.exe`;
+const SOURCE_COMMIT = "b4c6aa448381907d0a6459886a91f1800b92236a";
 const exec = promisify(execFile);
 // Independent pinned public update-verification key; never trust a key supplied by the artifact.
 const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA09ZxJMbpq1uFEnz7n52M\nAJtceCXVQCo57lgwMAmizgJaGVGsgsMpzqgCCRgXBN+bPygE+16S9XwYOwHDlnNG\noq8h+bE9Nxce3PzsQHrscdHTT1lGQ/5XwSmvzTvxLdURtQWpaXZl7lJghUnZHNDA\n8SOHbk8rQ+butE82lhcq0C+hgJgHTUqFl9Irppi2O+MpufsZo8PX5jphD4H0aX0k\nB9P+LUreoBmG/L3T3AMZEzQZG606awc/ZMYsJcJkt4xNMjR3ZMz1aWKErW2AXDeY\nyfAo0zmEAUEAFSc3UEJRnmBAjorVA3C/rHJzYP7QabSh8ORLOUrqQYgqCpTLETpf\nct0J+NphCLuBGNQ5IeId5IPiBNZlKynGzP/HK+oJTvJ31hTHIiaA+5pfIESXELIZ\nJ5awYGW0y7fii0CqRGwFMJnU829APVvAC9LJUzSSz7NP+2rmc/boYInx8cjN2/LO\nLI9HsPvON+oxM4MhjRxDd4CVoKDpI+rB2TthSdfxt3UxAgMBAAE=\n-----END PUBLIC KEY-----";
@@ -80,18 +81,18 @@ function missingOwnedKeychainDefaultConfirmed(defaults, list, reads) {
 }
 const REVIEWED_ARTIFACTS = {
     "source": {
-        "releaseId": 438479244,
-        "assetId": 725008723,
-        "sha256": "46ac84d70c9d5f0587bdca34295bf4719b5c3f27b3639a2da645c7f392d97f88",
-        "manifestAssetId": 725016062,
-        "manifestSha256": "019b81b6d004229888e043f37ced7541a08f4f3ef3d85d5cb876ee8da2246e39"
-    },
-    "target": {
         "releaseId": 438599980,
         "assetId": 725548857,
         "sha256": "8d83687fef0d044bb13a95013549bd7323902e9d127b5f3f252a23fa8dec5bf0",
         "manifestAssetId": 725554876,
         "manifestSha256": "333ab4e06a17b6d7ad50886544192533775c80844052334ba1f3d507dd4a009d"
+    },
+    "target": {
+        "releaseId": 438810307,
+        "assetId": 726500203,
+        "sha256": "cfd08238636ed7d88313225dd45159e113d930ec0a022943c965040ef2c82d66",
+        "manifestAssetId": 726515219,
+        "manifestSha256": "19ecd45b0f7808e856bba4ac28ebc2f6a0368f7ccf4533f5716392463ec66d3e"
     }
 };
 async function main() {
@@ -112,7 +113,7 @@ async function main() {
     const root = join(await realpath(process.env.RUNNER_TEMP), "cyberfi-windows-auth-update"); await mkdir(root);
     const evidence = join(root, "evidence"), applications = join(root, "Applications"); let profile;
     await Promise.all([evidence, applications].map(path => mkdir(path)));
-    const report = { success: false, sourceVersion: "0.0.126", targetVersion: VERSION, sourceCommit: SOURCE_COMMIT,
+    const report = { success: false, sourceVersion: SOURCE_VERSION, targetVersion: VERSION, sourceCommit: SOURCE_COMMIT,
         progress: [], events: [], videos: [], errors: [], limits: ["Unmodified production NSIS must preserve hidden/debug environment itself; otherwise acceptance fails without a manual target launch.", "No OS trust-store changes; RSA pins and Authenticode CMS are checked independently."] };
     const save = () => writeFile(join(evidence, "automatic-update.json"), JSON.stringify(report, null, 2) + "\n");
     const command = async (file, args, options = {}) => {
@@ -176,7 +177,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
     let stage = "published artifacts", updateArmed = false, rendererDetached = false, monitorPhase = "process-poll";
     const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
     async function processes() {
-        const value = await powershell(`@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe','CyberFi-0.0.128-x64.exe') } | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Depth 3 -Compress`);
+        const value = await powershell(`@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CyberFi.exe','${TARGET_INSTALLER}') } | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Depth 3 -Compress`);
         const parsed = value ? JSON.parse(value) : []; return Array.isArray(parsed) ? parsed : [parsed];
     }
     try {
@@ -194,7 +195,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         await mkdir(profile); assert.equal((await realpath(profile)).toLowerCase(), profile.toLowerCase());
         report.defaultProfileOwnership = { path: profile, canonicalRoaming: roaming, canonicalHome: nativeHome, sid: nativeIdentity.sid, initiallyAbsent: true, disposableHostedRunnerOnly: true, defaultProfileContract: "Hidden mode appData/CyberFi" };
         const artifacts = {};
-        for (const [kind, version] of [["source", "0.0.126"], ["target", VERSION]]) {
+        for (const [kind, version] of [["source", SOURCE_VERSION], ["target", VERSION]]) {
             const pin = pins[kind], release = await api(`repos/${REPOSITORY}/releases/${pin.releaseId}`);
             assert(publishedReleaseMatches(release, pin.releaseId, "v" + version), "Both exact Windows releases must be published");
             const filename = `CyberFi-${version}-x64.exe`, asset = release.assets.find(item => item.id === pin.assetId), manifest = release.assets.find(item => item.id === pin.manifestAssetId);
@@ -219,7 +220,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         // Real per-user NSIS installation, not archive extraction. No trust certificate is installed.
         await command(artifacts.source.path, ["/S", "/D=" + installation], { timeout: 180000 });
         executable = join(installation, "CyberFi.exe"); assert(executable.startsWith(root + sep));
-        assert.equal(await powershell(`(Get-Item -LiteralPath ${quote(executable)}).VersionInfo.ProductVersion`), "0.0.126.0");
+        assert.equal(await powershell(`(Get-Item -LiteralPath ${quote(executable)}).VersionInfo.ProductVersion`), SOURCE_VERSION + ".0");
         report.sourceSignature = await windowsSignature(executable);
             watcherStop = join(root, "visibility-stop");
             const watcherSource = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
@@ -385,11 +386,11 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         video = await gymElectronVideoRecord(page, { path: join(evidence, "actual-source-update.webm"), fps: 5 });
         await page.evaluate(() => { localStorage.setItem("pdr-kocum-agent.language", "tr"); localStorage.setItem("happy.welcome.v1", JSON.stringify({ welcomeAcknowledged: true })); });
         await page.reload({ waitUntil: "commit" });
-        stage = "source126 protected login";
+        stage = "source protected login";
         await page.waitForFunction(() => !document.querySelector('[data-testid="desktop-startup-screen"]') && !!document.querySelector('[data-happy-desktop-ui="cyberfi-account-login"] input[name="password"]:not(:disabled)'), undefined, { timeout: 60000 });
         await page.addStyleTag({ content: 'input[name="username"], input[name="password"] { color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }' });
         const sourceLogin = page.locator('[data-happy-desktop-ui="cyberfi-account-login"]');
-        assert(await page.evaluate(async () => { try { await window.happyDesktop.runtimeGet(); return false; } catch { return true; } }), "Source126 must deny privileged IPC before login");
+        assert(await page.evaluate(async () => { try { await window.happyDesktop.runtimeGet(); return false; } catch { return true; } }), "Source must deny privileged IPC before login");
         await sourceLogin.locator('input[name="username"]').fill(username); await sourceLogin.locator('input[name="password"]').fill(password);
         assert.equal(await sourceLogin.getByRole("checkbox", { name: "Beni hatırla" }).isChecked(), false);
         await sourceLogin.getByRole("button", { name: "Giriş yap", exact: true }).click();
@@ -411,12 +412,12 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const general = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await general.count()) await general.click();
         const select = page.locator("#cyberfi-settings-desktop-version"); await select.waitFor({ state: "visible", timeout: 60000 });
         await page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/iu }).first().click();
-        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(value => value.version === "0.0.128"), undefined, { timeout: 45000 });
+        await page.waitForFunction(async version => (await window.happyDesktop.runtimeGet()).update?.versions?.some(value => value.version === version), VERSION, { timeout: 45000 });
         await select.selectOption(VERSION);
         const installers = [];
         monitor = (async () => { while (!stopWatch) {
             monitorPhase = "process-poll";
-            installers.push(...(await processes()).filter(value => value.Name === "CyberFi-0.0.128-x64.exe"));
+            installers.push(...(await processes()).filter(value => value.Name === TARGET_INSTALLER));
             if (alive(oldPid) && !rendererDetached) {
                 monitorPhase = "renderer-poll";
                 try { const value = await page.evaluate(async () => { const update = (await window.happyDesktop.runtimeGet()).update, bar = document.querySelector('[role="progressbar"][aria-label="Masaüstü indirmesi"], [role="progressbar"][aria-label="Desktop download"]'), visible = !!bar?.getClientRects().length && getComputedStyle(bar).visibility !== "hidden";
@@ -537,7 +538,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         // Keep the native observer active until the installer cannot launch
         // another target and every exact owned app process has terminated.
         try {
-            for (const value of (await processes()).filter(value => value.Name === "CyberFi-0.0.128-x64.exe" && value.ParentProcessId === report.oldPid && /--updated/u.test(value.CommandLine ?? "") && /--force-run/u.test(value.CommandLine ?? ""))) {
+            for (const value of (await processes()).filter(value => value.Name === TARGET_INSTALLER && value.ParentProcessId === report.oldPid && /--updated/u.test(value.CommandLine ?? "") && /--force-run/u.test(value.CommandLine ?? ""))) {
                 assert(value.ExecutablePath?.toLowerCase().includes("cyberfi-update-"));
                 assert.equal(await hashFile(value.ExecutablePath), pins.target.sha256); await windowsSignature(value.ExecutablePath);
                 if (verifiedInstaller) assert(value.ProcessId === verifiedInstaller.ProcessId && value.CreationDate === verifiedInstaller.CreationDate);
@@ -567,10 +568,10 @@ if (process.argv.includes("--self-test")) {
     assert.equal(updateMonitorKind(Error("page.evaluate: Target page, context or browser has been closed"), "process-poll"), "process-poll-error");
     assert.equal(updateMonitorKind({ cyberfiUpdateFailure: "updater-error", message: "page.evaluate: Target page, context or browser has been closed" }, "renderer-poll"), "updater-error");
 
-    assert(publishedReleaseMatches({ id: 1, tag_name: "v0.0.128", draft: false }, 1, "v0.0.128"));
-    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.128", draft: true }, 1, "v0.0.128"));
-    assert(!publishedReleaseMatches({ id: 2, tag_name: "v0.0.128", draft: false }, 1, "v0.0.128"));
-    assert(!publishedReleaseMatches({ id: 1, tag_name: "v0.0.126", draft: false }, 1, "v0.0.128"));
+    assert(publishedReleaseMatches({ id: 1, tag_name: "v" + VERSION, draft: false }, 1, "v" + VERSION));
+    assert(!publishedReleaseMatches({ id: 1, tag_name: "v" + VERSION, draft: true }, 1, "v" + VERSION));
+    assert(!publishedReleaseMatches({ id: 2, tag_name: "v" + VERSION, draft: false }, 1, "v" + VERSION));
+    assert(!publishedReleaseMatches({ id: 1, tag_name: "v" + SOURCE_VERSION, draft: false }, 1, "v" + VERSION));
     for (const pin of Object.values(REVIEWED_ARTIFACTS)) artifactPins(pin);
     assert.throws(() => artifactPins({ ...REVIEWED_ARTIFACTS.source, assetId: -1 }));
     assert.throws(() => allowedRedirect("https://api.github.com.evil.test/"));
