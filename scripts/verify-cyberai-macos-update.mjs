@@ -39,11 +39,11 @@ const REVIEWED_ARTIFACTS = {
             "manifestSha256": "85f88b44080bba1299d93b97f2b15204c8595ea8f83ab4291568076768e979fd"
         },
         "target": {
-            "releaseId": 439214570,
-            "assetId": 727743752,
-            "sha256": "aa6fd4c9befd1769f240feb108a3f0032812481cb72cc0575c5efa1666b52a4c",
-            "manifestAssetId": 727761788,
-            "manifestSha256": "85f88b44080bba1299d93b97f2b15204c8595ea8f83ab4291568076768e979fd"
+            "releaseId": 439509221,
+            "assetId": 728593458,
+            "sha256": "7de37a5efe2493b68aa16dc9bb1c570062618e017957dbfbd2a3ba75788558cf",
+            "manifestAssetId": 728603520,
+            "manifestSha256": "cb139dd6bef39f52e076a45a3dfa75bcaaf214bf0b09152df409c515894f592c"
         }
     }
 };

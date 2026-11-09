@@ -11,7 +11,7 @@ permissions:
     contents: read
 jobs:
     native:
-        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/macos-fresh-engine-131-acceptance' && inputs.target == 'macos-x64'
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/macos-fresh-engine-131-acceptance' && inputs.target != 'windows'
         permissions:
             contents: write # Required by GitHub to read the exact signed draft assets.
         runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-26' || 'macos-15-intel' }}
