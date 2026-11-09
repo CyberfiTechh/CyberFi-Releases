@@ -78,15 +78,6 @@ function missingOwnedKeychainDefaultConfirmed(defaults, list, reads) {
     const failed = reads.filter(read => !read.success);
     return defaults.length === 0 && list.length === 0 && failed.length === 1 && failed[0].context === "owned-home" && failed[0].verb === "default-keychain" && failed[0].exitCode === 1 && /A default keychain could not be found/iu.test(failed[0].diagnostic);
 }
-function engineDiagnosticText(value, secrets) {
-    let text = String(value ?? "").replace(/\x1b\[[0-9;]*m/gu, "");
-    for (const secret of secrets.filter(value => typeof value === "string" && value.length > 0)) text = text.replaceAll(secret, "[REDACTED]");
-    text = text.replace(/\bBearer\s+[^\s"'<>]+/giu, "Bearer [REDACTED]")
-        .replace(/(["']?\b(?:token|password|secret|api[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, "$1[REDACTED]")
-        .split(/\r?\n/u).filter(line => !/token|password|secret|credential|api[_-]?key|bearer|authorization|cookie/iu.test(line) && !/^\s*(?:headers|request body|response body|HTTP\/\d)\s*[:= ]/iu.test(line) && !/^\s*[\{\[]["\{\[]/u.test(line)).join("\n");
-    return Buffer.from(text).subarray(0, 4096).toString("utf8");
-}
-
 const REVIEWED_ARTIFACTS = {
     "source": {
         "releaseId": 438479244,
@@ -334,6 +325,8 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         for (const name of [".config", ".cache", ".local/share", ".local/state", "AppData/Local", "AppData/Roaming"]) await mkdir(join(paths.home, name), { recursive: true });
         await writeFile(join(config, "happy.toml"), '[settings]\nhappy_integration = false\nmenu_bar = false\n\n[providers.codex]\ntype = "codex"\nenabled = true\ncredential_isolation = true\n');
         const stop = () => command(engine, ["stop"], { cwd: paths.root, env: engineEnv }).catch(() => undefined);
+        // Windows AF_UNIX sun_path has room for 107 bytes plus the terminator.
+        assert(Buffer.byteLength(join(paths.happyHome, "agent", "h.sock")) <= 107, "Owned fixture exceeds the Windows engine socket path limit");
         stage = "owned engine daemon startup";
         runtime = { stop }; await command(engine, ["start"], { cwd: paths.root, env: engineEnv });
         stage = "owned engine authenticated health";
@@ -505,6 +498,14 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         report.actualInstallation = true; report.targetManuallyLaunched = false; report.authenticatedTargetChat = true; report.profilePreserved = true; report.success = true;
     } catch (error) {
         report.failedStage = stage; report.errors.push("Native update acceptance failed"); report.commandFailure = error.cyberaiCommand;
+        if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines.windows[2] && error.cyberaiCommand.verb === "start") {
+            const logPath = join(paths.happyHome, "agent", "daemon.log");
+            const log = await lstat(logPath).catch(() => undefined);
+            const content = log?.isFile() && !log.isSymbolicLink() && log.size <= 65536 && await realpath(logPath).catch(() => undefined) === logPath
+                ? await readFile(logPath, "utf8").catch(() => "") : "";
+            report.engineDaemonDiagnosticCodes = [...new Set([content, error.stdout, error.stderr].join("\n")
+                .match(/\b(?:EADDRINUSE|EACCES|EPERM|ENOENT|ENAMETOOLONG|EINVAL|ENOTSUP|WSAEINVAL|WSAEACCES)\b/gu) ?? [])];
+        }
         report.handoffDiagnostic = {
             failureCode: monitorError ? "update-monitor-failed" : runError ? "source-launcher-failed" : "acceptance-assertion-failed",
             monitorKind: report.monitorKind ?? null,

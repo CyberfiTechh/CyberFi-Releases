@@ -389,12 +389,12 @@ public static class CyberFiStandardLaunch {
     }
 
     $report.stage = 'prepare-owned-fixture'
-    $fixture = New-Item -ItemType Directory -Path (Join-Path $tempRoot.FullName ('cyberfi-standard-launch-' + $nonce))
+    $fixture = New-Item -ItemType Directory -Path (Join-Path $tempRoot.FullName ('cf-launch-' + $nonce))
     $rule = [Security.AccessControl.FileSystemAccessRule]::new($accountSid, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
     $acl = Get-Acl -LiteralPath $fixture.FullName
     $acl.AddAccessRule($rule)
     Set-Acl -LiteralPath $fixture.FullName -AclObject $acl
-    $scratch = (New-Item -ItemType Directory -Path (Join-Path $fixture.FullName 'scratch')).FullName
+    $scratch = (New-Item -ItemType Directory -Path (Join-Path $fixture.FullName 'tmp')).FullName
     $runRoot = (New-Item -ItemType Directory -Path (Join-Path $fixture.FullName 'run')).FullName
     $probe = Join-Path $fixture.FullName 'probe.ps1'
     $started = Join-Path $fixture.FullName 'started.flag'
@@ -583,7 +583,7 @@ exit 23
     }
     if ($fixture) {
         try {
-            $ownedRoot = Join-Path $tempRoot.FullName ('cyberfi-standard-launch-' + $nonce)
+            $ownedRoot = Join-Path $tempRoot.FullName ('cf-launch-' + $nonce)
             if ($nonce -cnotmatch '^[a-f0-9]{32}$' -or $fixture.FullName -ine $ownedRoot) { throw 'Unexpected fixture root.' }
             $directory = Get-OwnedEntry $ownedRoot $true
             if ($RunUpdate -and $artifactRoot) {
