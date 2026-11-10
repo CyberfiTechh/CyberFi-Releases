@@ -53,7 +53,7 @@ function updateMonitorKind(error, phase) {
 
 function fixtureAttachFailure(error) {
     const allowed = new Set([
-        "inspector-bridge", "inspector-loopback", "inspector-owner", "fixture-inputs",
+        "inspector-bridge", "inspector-loopback", "inspector-owner", "fixture-inputs", "fixture-assets",
         "inspector-transport", "fixture-identity", "fixture-install",
     ]);
     if (allowed.has(error?.fixtureCode)) return error.fixtureCode;

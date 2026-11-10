@@ -438,8 +438,9 @@ async function main() {
     } catch (error) {
         report.failedStage = report.stage;
         if (report.stage === "attach owned draft feed fixture" &&
-            /^(?:inspector-(?:bridge|owner|transport)|fixture-(?:inputs|identity|install))$/u.test(error?.fixtureCode ?? "")) {
+            /^(?:inspector-(?:bridge|loopback|owner|transport)|fixture-(?:inputs|assets|identity|install))$/u.test(error?.fixtureCode ?? "")) {
             report.fixtureAttachFailure = error.fixtureCode;
+            if (/^(?:ENOENT|EPERM|EACCES|EINVAL|ERR_INVALID_ARG_TYPE|ERR_ASSERTION)$/u.test(error.code ?? "")) report.fixtureErrorCode = error.code;
         }
         report.failureCode = error?.name === "AssertionError" ? "assertion_failed" : error?.name === "TimeoutError" ? "ui_timeout" : error?.name === "AbortError" ? "operation_timeout" : "native_operation_failed";
         report.errors.push("Native update acceptance failed");

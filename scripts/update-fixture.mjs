@@ -219,7 +219,11 @@ export async function attachUpdateFixture(options) {
             "Windows requires the existing disposable local-user launcher");
     }
     assert(within(profileRoot, appProfile), "Unexpected profile location");
-    const fixture = await checkedAssets(assets, process.platform, process.arch, packageSha256, manifestSha256);
+    const fixture = await checkedAssets(assets, process.platform, process.arch, packageSha256, manifestSha256)
+        .catch(error => {
+            if (error instanceof Error) error.fixtureCode = "fixture-assets";
+            throw error;
+        });
     const expected = { pid, executable: binary, profile, owner, platform: process.platform, arch: process.arch, ref,
         repository: REPOSITORY, sourceVersion: SOURCE_VERSION, sid: process.env.CYBERFI_TEST_EXPECTED_SID };
     let inspector, stage = "inspector-transport";

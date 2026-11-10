@@ -42,38 +42,27 @@ export function assertDraftRelease(release, kind, pin, tag, sourceCommit) {
     }
 }
 
-async function ownedInspectorUrl(pid, rendererPort) {
-    assert(Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(rendererPort) && rendererPort > 0 && rendererPort < 65536);
-    const cmd = process.platform === "win32" ?
+async function verifyInspectorOwner(pid, port) {
+    assert(Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(port) && port > 0 && port < 65536);
+    const windows = process.platform === "win32";
+    const cmd = windows ?
         join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "/usr/sbin/lsof";
-    const args = process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-        "Get-NetTCPConnection -OwningProcess " + pid + " -State Listen -LocalAddress '127.0.0.1' | Select-Object -ExpandProperty LocalPort"] :
-        ["-nP", "-a", "-p", String(pid), "-iTCP@127.0.0.1", "-sTCP:LISTEN", "-Fn"];
+    const args = windows ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+        "Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort " + port +
+        " -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique"] :
+        ["-nP", "-a", "-p", String(pid), "-iTCP@127.0.0.1:" + port, "-sTCP:LISTEN", "-Fp"];
     for (let attempt = 0; attempt < 5; attempt++) {
         const { stdout } = await exec(cmd, args, { windowsHide: true, timeout: 10000, maxBuffer: 8192 })
             .catch(error => error.code === 1 ? { stdout: "" } : Promise.reject(error));
-        const ports = [...new Set(stdout.split(/\r?\n/u).flatMap(line => {
-            const match = /^(?:n127[.]0[.]0[.]1:)?([1-9][0-9]{0,4})$/u.exec(line.trim());
-            return match ? [Number(match[1])] : [];
-        }))].filter(port => port !== rendererPort && port < 65536);
-        const nodes = [];
-        for (const port of ports) {
-            const data = await fetch("http://127.0.0.1:" + port + "/json/list", {
-                redirect: "error", signal: AbortSignal.timeout(750),
-            }).then(response => response.ok ? response.json() : null).catch(() => null);
-            for (const node of Array.isArray(data) ? data : []) {
-                if (node.type === "node" && typeof node.webSocketDebuggerUrl === "string" &&
-                    node.webSocketDebuggerUrl.startsWith("ws://127.0.0.1:" + port + "/"))
-                    nodes.push(node.webSocketDebuggerUrl);
-            }
-        }
-        if (nodes.length === 1) return nodes[0];
-        assert(nodes.length === 0, "Several inspectors belong to the source PID");
+        const owners = [...new Set(stdout.trim().split(/\r?\n/u)
+            .filter(line => windows ? /^\d+$/u.test(line) : /^p\d+$/u.test(line))
+            .map(line => Number(windows ? line : line.slice(1))))];
+        if (owners.length === 1 && owners[0] === pid) return;
+        assert(owners.length === 0, "Inspector socket is not uniquely owned by the source PID");
         await delay(200);
     }
     throw new Error("Owned source Node inspector was unavailable");
 }
-
 export async function beginDraftFixture({ page, pid, executable, profile, root, rendererPort, owner, pin }) {
     // Only the authenticated, hidden source renderer can open its main-process inspector.
     let stage = "inspector-bridge";
@@ -82,12 +71,17 @@ export async function beginDraftFixture({ page, pid, executable, profile, root, 
             return (await window.happyDesktop.debugMainInspectorStart()).main;
         });
         assert(main?.status === "running" && typeof main.url === "string", "Owned main inspector did not start");
+        stage = "inspector-loopback";
+        const endpoint = new URL(main.url);
+        const port = Number(endpoint.port);
+        assert(endpoint.protocol === "ws:" && endpoint.hostname === "127.0.0.1" && port !== rendererPort &&
+            !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash &&
+            /^\/[a-f0-9-]{36}$/u.test(endpoint.pathname), "Unexpected main inspector address");
         stage = "inspector-owner";
-        const inspectorUrl = await ownedInspectorUrl(pid, rendererPort);
-        assert.equal(inspectorUrl, main.url, "Inspector endpoint belongs to another process");
+        await verifyInspectorOwner(pid, port);
         stage = "fixture-inputs";
         return await attachUpdateFixture({
-            pid, executable, profile, assetsRoot: root, inspectorUrl, owner,
+            pid, executable, profile, assetsRoot: root, inspectorUrl: endpoint.href, owner,
             ref: process.env.ACCEPTANCE_FIXTURE_REF, packageSha256: pin.sha256, manifestSha256: pin.manifestSha256,
         });
     } catch (error) {
