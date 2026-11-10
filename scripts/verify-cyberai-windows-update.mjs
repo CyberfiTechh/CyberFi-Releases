@@ -446,6 +446,11 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
                 for (const [path, text] of sentinels) assert.equal(await readFile(path, "utf8"), text);
             },
         });
+        fixture.close();
+        fixture = undefined;
+        const debugStopped = await page.evaluate(() => window.happyDesktop.debugMainInspectorStop());
+        assert.equal(debugStopped.main.status, "stopped");
+        report.updateFixture.inspectorDetachedBeforeInstall = true;
         const updateStartedAt = Date.now();
         const installers = [];
         monitor = (async () => { while (!stopWatch) {

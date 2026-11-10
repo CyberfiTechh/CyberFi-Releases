@@ -323,6 +323,12 @@ async function main() {
         assert(!(await readdir(apps)).some(name => name.startsWith(".cyberfi-update-")));
         report.updateFixture = { feed: "owned exact draft fixture", publicFeedVerified: false,
             positiveTransport: await fixture.report(), sharedDownloadRefusalsCoveredOnWindows: true };
+        // Keep the in-process fetch fixture armed, but let Node exit without an attached debugger.
+        fixture.close();
+        fixture = undefined;
+        const debugStopped = await page.evaluate(() => window.happyDesktop.debugMainInspectorStop());
+        assert.equal(debugStopped.main.status, "stopped");
+        report.updateFixture.inspectorDetachedBeforeInstall = true;
         let ticket, ready, stagePath, oldExitObserved = false;
         monitor = Promise.all([(async () => {
             while (!stop) {
