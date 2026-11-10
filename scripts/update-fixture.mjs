@@ -209,7 +209,7 @@ export async function attachUpdateFixture(options) {
     assert(Number.isSafeInteger(pid) && pid > 0 && /^[a-f0-9]{32}$/u.test(owner), "Missing owned process identity");
     assert([executable, profile, assetsRoot].every(isAbsolute), "Expected absolute owned fixture paths");
     const runnerRoot = await realpath(process.env.RUNNER_TEMP);
-    const [binary, appProfile, assets] = await Promise.all([executable, profile, assetsRoot].map(realpath));
+    const [binary, appProfile, assets] = await Promise.all([executable, profile, assetsRoot].map(path => realpath(path)));
     assert(within(runnerRoot, binary) && within(runnerRoot, assets) &&
         basename(binary).toLowerCase() === (process.platform === "win32" ? "cyberfi.exe" : "cyberfi"),
         "Unexpected source installation or asset location");
