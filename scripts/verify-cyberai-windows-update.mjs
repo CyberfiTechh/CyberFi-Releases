@@ -539,6 +539,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         report.actualInstallation = true; report.targetManuallyLaunched = false; report.authenticatedTargetChat = true; report.profilePreserved = true; report.success = true;
     } catch (error) {
         report.failedStage = stage; report.errors.push("Native update acceptance failed"); report.commandFailure = error.cyberaiCommand;
+        if (stage === "altered signature and bytes are refused" && error.draftRefusal) report.draftRefusalDiagnostic = error.draftRefusal;
         if (stage === "attach owned draft feed fixture") report.fixtureAttachFailure = fixtureAttachFailure(error);
         if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines.windows[2] && error.cyberaiCommand.verb === "start") {
             const logPath = join(paths.happyHome, "agent", "daemon.log");

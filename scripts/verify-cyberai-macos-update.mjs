@@ -437,6 +437,7 @@ async function main() {
         report.success = true;
     } catch (error) {
         report.failedStage = report.stage;
+        if (report.stage === "altered signature and bytes are refused" && error.draftRefusal) report.draftRefusalDiagnostic = error.draftRefusal;
         if (report.stage === "attach owned draft feed fixture" &&
             /^(?:inspector-(?:bridge|loopback|owner|transport)|fixture-(?:inputs|assets|identity|install))$/u.test(error?.fixtureCode ?? "")) {
             report.fixtureAttachFailure = error.fixtureCode;

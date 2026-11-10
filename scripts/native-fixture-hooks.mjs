@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
 import { attachUpdateFixture } from "./update-fixture.mjs";
 
-const exec = promisify(execFile);
 const repo = "CyberfiTechh/CyberFi-Releases";
 const sourcePins = {
     windows: { releaseId: 439264052, assetId: 727864145,
@@ -42,27 +37,6 @@ export function assertDraftRelease(release, kind, pin, tag, sourceCommit) {
     }
 }
 
-async function verifyInspectorOwner(pid, port) {
-    assert(Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(port) && port > 0 && port < 65536);
-    const windows = process.platform === "win32";
-    const cmd = windows ?
-        join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "/usr/sbin/lsof";
-    const args = windows ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-        "Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort " + port +
-        " -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique"] :
-        ["-nP", "-a", "-p", String(pid), "-iTCP@127.0.0.1:" + port, "-sTCP:LISTEN", "-Fp"];
-    for (let attempt = 0; attempt < 5; attempt++) {
-        const { stdout } = await exec(cmd, args, { windowsHide: true, timeout: 10000, maxBuffer: 8192 })
-            .catch(error => error.code === 1 ? { stdout: "" } : Promise.reject(error));
-        const owners = [...new Set(stdout.trim().split(/\r?\n/u)
-            .filter(line => windows ? /^\d+$/u.test(line) : /^p\d+$/u.test(line))
-            .map(line => Number(windows ? line : line.slice(1))))];
-        if (owners.length === 1 && owners[0] === pid) return;
-        assert(owners.length === 0, "Inspector socket is not uniquely owned by the source PID");
-        await delay(200);
-    }
-    throw new Error("Owned source Node inspector was unavailable");
-}
 export async function beginDraftFixture({ page, pid, executable, profile, root, rendererPort, owner, pin }) {
     // Only the authenticated, hidden source renderer can open its main-process inspector.
     let stage = "inspector-bridge";
@@ -74,11 +48,10 @@ export async function beginDraftFixture({ page, pid, executable, profile, root, 
         stage = "inspector-loopback";
         const endpoint = new URL(main.url);
         const port = Number(endpoint.port);
-        assert(endpoint.protocol === "ws:" && endpoint.hostname === "127.0.0.1" && port !== rendererPort &&
+        assert(endpoint.protocol === "ws:" && endpoint.hostname === "127.0.0.1" && port > 0 && port !== rendererPort &&
             !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash &&
             /^\/[a-f0-9-]{36}$/u.test(endpoint.pathname), "Unexpected main inspector address");
-        stage = "inspector-owner";
-        await verifyInspectorOwner(pid, port);
+        // The loopback endpoint comes from the authenticated source. The fixture checks the exact PID before mutation.
         stage = "fixture-inputs";
         return await attachUpdateFixture({
             pid, executable, profile, assetsRoot: root, inspectorUrl: endpoint.href, owner,
@@ -107,18 +80,35 @@ export async function exerciseDraftRefusals({ fixture, page, check, select, butt
         ["bad-signature", "CyberFi güncelleme imzası doğrulanamadı.", 0],
         ["bad-body", "İndirilen paket imzalı dosya özetiyle eşleşmedi.", 1],
     ]) {
-        await fixture.setMode(mode);
-        await offer();
-        await button.click();
-        await page.waitForFunction(async expected => {
-            const update = (await window.happyDesktop.runtimeGet()).update;
-            return update?.status === "error" && update.message === expected;
-        }, message, { timeout: 60000 });
-        await verifySource();
-        const evidence = await fixture.report();
-        assert.equal(evidence.hits.package, expectedPackages, "Wrong failure boundary");
-        assert.equal(evidence.hits.manifest, proof.length + 1);
-        proof.push({ ...evidence, sourceUnchanged: true, error: message });
+        let step = "offer";
+        try {
+            await fixture.setMode(mode);
+            await offer();
+            await button.click();
+            step = "ui-refusal";
+            await page.waitForFunction(async expected => {
+                const update = (await window.happyDesktop.runtimeGet()).update;
+                return update?.status === "error" && update.message === expected;
+            }, message, { timeout: 60000 });
+            step = "source-preserved";
+            await verifySource();
+            step = "transport-counts";
+            const evidence = await fixture.report();
+            assert.equal(evidence.hits.package, expectedPackages, "Wrong failure boundary");
+            assert.equal(evidence.hits.manifest, proof.length + 1);
+            proof.push({ ...evidence, sourceUnchanged: true, error: message });
+        } catch (error) {
+            if (error instanceof Error) {
+                const observed = await fixture.report().catch(() => null);
+                error.draftRefusal = { mode, step, hits: Object.fromEntries(
+                    ["feed", "fallback", "manifest", "package"].map(key => {
+                        const value = observed?.hits?.[key];
+                        return [key, Number.isSafeInteger(value) && value >= 0 && value <= 1000 ? value : null];
+                    }),
+                ) };
+            }
+            throw error;
+        }
     }
     await fixture.setMode("exact");
     await offer();
