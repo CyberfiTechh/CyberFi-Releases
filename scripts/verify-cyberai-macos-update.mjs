@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { assertDraftRelease, beginDraftFixture, exerciseDraftRefusals, reviewedDraftPins } from "./native-fixture-hooks.mjs";
+import { assertDraftRelease, beginDraftFixture, offerDraftUpdate, reviewedDraftPins } from "./native-fixture-hooks.mjs";
 import { createHash, verify, randomBytes } from "node:crypto";
 import { constants, createReadStream, createWriteStream } from "node:fs";
 import { copyFile, chmod, mkdir, readFile, readdir, realpath, lstat, writeFile, stat } from "node:fs/promises";
@@ -313,15 +313,16 @@ async function main() {
         report.previewUpdatesEnabled = false;
         const check = page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/iu }).first();
         const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu });
-        report.stage = "altered signature and bytes are refused";
-        report.updateFixture = await exerciseDraftRefusals({ fixture, page, check, select, button,
-            verifySource: async () => {
-                assert.equal(await listenerPid(), oldPid);
-                assert.deepEqual(await bundleProof(app), proofs.source);
-                assert(!(await readdir(apps)).some(name => name.startsWith(".cyberfi-update-")));
-                for (const [path, text] of sentinels) assert.equal(await readFile(path, "utf8"), text);
-            },
-        });
+        report.stage = "exact signed draft offer";
+        // The shared download verifier is exercised against altered bytes by the Windows run.
+        // On Mac, the production helper must prove the exact signed update and automatic reopen.
+        await fixture.setMode("exact");
+        await offerDraftUpdate({ fixture, page, check, select, button });
+        assert.equal(await listenerPid(), oldPid);
+        assert.deepEqual(await bundleProof(app), proofs.source);
+        assert(!(await readdir(apps)).some(name => name.startsWith(".cyberfi-update-")));
+        report.updateFixture = { feed: "owned exact draft fixture", publicFeedVerified: false,
+            positiveTransport: await fixture.report(), sharedDownloadRefusalsCoveredOnWindows: true };
         let ticket, ready, stagePath, oldExitObserved = false;
         monitor = Promise.all([(async () => {
             while (!stop) {
@@ -434,7 +435,6 @@ async function main() {
         report.success = true;
     } catch (error) {
         report.failedStage = report.stage;
-        if (report.stage === "altered signature and bytes are refused" && error.draftRefusal) report.draftRefusalDiagnostic = error.draftRefusal;
         if (report.stage === "attach owned draft feed fixture" &&
             /^(?:inspector-(?:bridge|loopback|owner|transport)|fixture-(?:inputs|assets|identity|install))$/u.test(error?.fixtureCode ?? "")) {
             report.fixtureAttachFailure = error.fixtureCode;

@@ -65,26 +65,27 @@ export async function beginDraftFixture({ page, pid, executable, profile, root, 
     }
 }
 
-export async function exerciseDraftRefusals({ fixture, page, check, select, button, verifySource }) {
+export async function offerDraftUpdate({ fixture, page, check, select, button }) {
     const version = "0.0.132";
-    const offer = async () => {
-        const initial = (await fixture.report()).hits;
-        await check.click();
-        const deadline = Date.now() + 15000;
-        let observed;
-        do {
-            observed = (await fixture.report()).hits;
-            if (observed.feed + observed.fallback > initial.feed + initial.fallback) break;
-            await delay(100);
-        } while (Date.now() < deadline);
-        assert(observed.feed + observed.fallback > initial.feed + initial.fallback, "The update check must make a new feed request");
-        await page.waitForFunction(async target => {
-            const update = (await window.happyDesktop.runtimeGet()).update;
-            return update?.status === "available" && update.availableVersion === target;
-        }, version, { timeout: 30000 });
-        await select.selectOption(version);
-        await button.waitFor({ state: "visible", timeout: 15000 });
-    };
+    const initial = (await fixture.report()).hits;
+    await check.click();
+    const deadline = Date.now() + 15000;
+    let observed;
+    do {
+        observed = (await fixture.report()).hits;
+        if (observed.feed + observed.fallback > initial.feed + initial.fallback) break;
+        await delay(100);
+    } while (Date.now() < deadline);
+    assert(observed.feed + observed.fallback > initial.feed + initial.fallback, "The update check must make a new feed request");
+    await page.waitForFunction(async target => {
+        const update = (await window.happyDesktop.runtimeGet()).update;
+        return update?.status === "available" && update.availableVersion === target;
+    }, version, { timeout: 30000 });
+    await select.selectOption(version);
+    await button.waitFor({ state: "visible", timeout: 15000 });
+}
+
+export async function exerciseDraftRefusals({ fixture, page, check, select, button, verifySource }) {
     const proof = [];
     for (const [mode, message, expectedPackages] of [
         ["bad-signature", "CyberFi güncelleme imzası doğrulanamadı.", 0],
@@ -93,7 +94,7 @@ export async function exerciseDraftRefusals({ fixture, page, check, select, butt
         let step = "offer";
         try {
             await fixture.setMode(mode);
-            await offer();
+            await offerDraftUpdate({ fixture, page, check, select, button });
             await button.click();
             step = "ui-refusal";
             await page.waitForFunction(async expected => {
@@ -121,7 +122,7 @@ export async function exerciseDraftRefusals({ fixture, page, check, select, butt
         }
     }
     await fixture.setMode("exact");
-    await offer();
+    await offerDraftUpdate({ fixture, page, check, select, button });
     return { feed: "owned exact draft fixture", publicFeedVerified: false, negativeCases: proof,
         positiveTransport: await fixture.report() };
 }
