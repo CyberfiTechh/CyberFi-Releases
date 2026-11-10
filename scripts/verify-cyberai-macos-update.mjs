@@ -123,7 +123,7 @@ async function main() {
     }
     const mounts = [];
     let fixture;
-    let paths, runtime, inferenceStop, appRun, appExit, appError, browser, page, video, watcher, observer, monitor, monitorError, stop = false, newPid;
+    let paths, runtime, inferenceStop, appRun, appExit, appExitAt, appError, browser, page, video, watcher, observer, monitor, monitorError, stop = false, newPid;
     async function ownedProcesses() {
         return ownedProcessRecords(await command("/bin/ps", ["-ww", "-axo", "pid=,comm="]), executable, apps);
     }
@@ -260,7 +260,7 @@ async function main() {
         const env = { ...safeEnv, ...runtime.environment, CYBERFI_UPDATE_FIXTURE_OWNER: owner, HAPPY_DESKTOP_WINDOWS_HIDDEN: "1", HAPPY_DESKTOP_DEBUG: "1", HAPPY_DEBUG_RENDERER_PORT: String(port) };
         report.stage = "source application startup";
         appRun = gymElectronProcessRun({ executablePath: executable, args: ["--user-data-dir=" + profile, "--debug"], env, timeout: 15 * 60000 })
-            .then(result => { appExit = result; }, error => { appError = error; });
+            .then(result => { appExit = result; appExitAt = Date.now(); }, error => { appError = error; });
         const require = createRequire(join(upstream, "packages/happy-desktop-gym/package.json"));
         const { chromium } = require("playwright");
         async function rendererConnect() {
@@ -329,7 +329,8 @@ async function main() {
         const debugStopped = await page.evaluate(() => window.happyDesktop.debugMainInspectorStop());
         assert.equal(debugStopped.main.status, "stopped");
         report.updateFixture.inspectorDetachedBeforeInstall = true;
-        let ticket, ready, stagePath, oldExitObserved = false;
+        let ticket, ready, readyWrittenAt, stagePath, oldExitObserved = false;
+        let handoffCheck = "stage-discovery";
         monitor = Promise.all([(async () => {
             while (!stop) {
                 if (!stagePath) {
@@ -338,19 +339,29 @@ async function main() {
                     if (names.length) stagePath = join(apps, names[0]);
                 }
                 if (stagePath && !ticket && await lstat(join(stagePath, "ready.json")).catch(error => { if (error.code !== "ENOENT") throw error; })) {
+                    handoffCheck = "ticket-identity";
                     ticket = JSON.parse(await readFile(join(stagePath, "ticket.json"), "utf8"));
                     if (ticket) assert(ticket.targetApp === app && ticket.userDataPath === profile && ticket.parentPid === oldPid && ticket.version === "0.0.132" && ticket.hidden === true);
                 }
                 if (ticket && !ready) {
+                    handoffCheck = "ready-identity";
                     ready = await readFile(ticket.readyPath, "utf8").then(JSON.parse).catch(error => { if (error.code !== "ENOENT") throw error; });
                     if (ready) {
-                        assert(ready.nonce === ticket.nonce && ready.parentPid === oldPid && alive(oldPid), "Helper readiness must be observed while the actual parent is alive");
-                        report.events.push({ type: "helper-ready", at: Date.now(), helperPid: ready.helperPid });
+                        assert(ready.nonce === ticket.nonce && ready.parentPid === oldPid && id(ready.helperPid) !== oldPid);
+                        // A polling observer can see the ready file only after the parent has already exited.
+                        readyWrittenAt = Math.floor((await stat(ticket.readyPath)).mtimeMs);
+                        report.events.push({ type: "helper-ready", at: readyWrittenAt, helperPid: ready.helperPid });
                     }
                 }
-                if (!oldExitObserved && !alive(oldPid)) {
-                    assert(ready, "Old app exited before an observed helper readiness handshake"); oldExitObserved = true;
-                    report.events.push({ type: "old-parent-exited", at: Date.now() });
+                if (!oldExitObserved && appExitAt && !alive(oldPid)) {
+                    handoffCheck = "ready-before-parent-exit";
+                    if (ready) {
+                        assert(readyWrittenAt <= appExitAt);
+                        oldExitObserved = true;
+                        report.events.push({ type: "old-parent-exited", at: appExitAt });
+                    } else {
+                        assert(Date.now() - appExitAt < 2000, "No helper readiness record for the exited parent");
+                    }
                 }
                 await delay(20);
             }
@@ -371,7 +382,10 @@ async function main() {
                 }
                 await delay(100);
             }
-        })()]).catch(error => { monitorError = error; });
+        })()]).catch(error => {
+            monitorError = error;
+            report.handoffMonitorCheck = handoffCheck;
+        });
         report.stage = "real GUI download and helper handoff";
         await button.click(); report.actualGui = true;
         const until = Date.now() + 12 * 60000;
