@@ -474,13 +474,17 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         const install = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu }); await install.waitFor({ state: "visible", timeout: 15000 });
         stage = "real GUI download and installer handoff"; updateArmed = true; await install.click(); report.clickedActualGuiButton = true;
         const until = Date.now() + 12 * 60000; while (!runResult && !runError && !monitorError && Date.now() < until) await delay(100);
-        assert(!monitorError && !runError && runResult?.exitCode === 0, "Actual old app did not complete updater handoff"); await run;
+        assert(!monitorError && !runError && runResult &&
+            [0, -1, 0xffffffff].includes(runResult.exitCode), "Actual old app did not reach a recognized updater exit");
+        report.sourceExitCode = runResult.exitCode;
+        await run;
         const sourceVideo = await video.stop(); video = undefined; assert(sourceVideo.framesReceived > 0 && sourceVideo.framesWritten > 0); report.videos.push(sourceVideo);
         const installerUntil = Date.now() + 30000;
         while (!installers.some(value => value.ParentProcessId === oldPid) && Date.now() < installerUntil) await delay(100);
         const installer = installers.find(value => value.ParentProcessId === oldPid && /--updated/u.test(value.CommandLine ?? "") && /\/S/u.test(value.CommandLine ?? "") && /--force-run/u.test(value.CommandLine ?? ""));
         assert(installer?.ExecutablePath?.toLowerCase().includes("cyberfi-update-"), "Actual production installer child not observed");
         assert.equal(await hashFile(installer.ExecutablePath), pins.target.sha256); assert.equal((await stat(installer.ExecutablePath)).size, artifacts.target.size);
+        // NSIS may stop a still-exiting source. An exit code alone never proves handoff.
         verifiedInstaller = installer;
         report.installer = { pid: installer.ProcessId, parentPid: oldPid, sha256: pins.target.sha256, signature: await windowsSignature(installer.ExecutablePath) };
         const handoffUntil = Date.now() + 180000; let replacement;

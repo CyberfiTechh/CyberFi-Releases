@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import { attachUpdateFixture } from "./update-fixture.mjs";
 
 const repo = "CyberfiTechh/CyberFi-Releases";
@@ -67,7 +68,16 @@ export async function beginDraftFixture({ page, pid, executable, profile, root, 
 export async function exerciseDraftRefusals({ fixture, page, check, select, button, verifySource }) {
     const version = "0.0.132";
     const offer = async () => {
+        const initial = (await fixture.report()).hits;
         await check.click();
+        const deadline = Date.now() + 15000;
+        let observed;
+        do {
+            observed = (await fixture.report()).hits;
+            if (observed.feed + observed.fallback > initial.feed + initial.fallback) break;
+            await delay(100);
+        } while (Date.now() < deadline);
+        assert(observed.feed + observed.fallback > initial.feed + initial.fallback, "The update check must make a new feed request");
         await page.waitForFunction(async target => {
             const update = (await window.happyDesktop.runtimeGet()).update;
             return update?.status === "available" && update.availableVersion === target;

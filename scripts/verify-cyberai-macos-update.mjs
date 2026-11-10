@@ -312,10 +312,7 @@ async function main() {
         assert.equal(JSON.parse(await readFile(join(configDir, "config.json"), "utf8")).previewUpdatesEnabled, false);
         report.previewUpdatesEnabled = false;
         const check = page.getByRole("button", { name: /^(Check for updates|Güncellemeleri denetle)$/iu }).first();
-        await check.click();
-        await page.waitForFunction(async () => (await window.happyDesktop.runtimeGet()).update?.versions?.some(item => item.version === "0.0.132"), undefined, { timeout: 45000 });
-        await select.selectOption("0.0.132");
-        const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu }); await button.waitFor({ state: "visible" });
+        const button = page.getByRole("button", { name: /^(Download and reopen|İndir ve yeniden aç|Kur ve yeniden aç)$/iu });
         report.stage = "altered signature and bytes are refused";
         report.updateFixture = await exerciseDraftRefusals({ fixture, page, check, select, button,
             verifySource: async () => {
