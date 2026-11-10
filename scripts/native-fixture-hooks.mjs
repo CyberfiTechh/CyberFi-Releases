@@ -74,11 +74,27 @@ async function ownedInspectorUrl(pid, rendererPort) {
     throw new Error("Owned source Node inspector was unavailable");
 }
 
-export async function beginDraftFixture({ pid, executable, profile, root, rendererPort, owner, pin }) {
-    return attachUpdateFixture({
-        pid, executable, profile, assetsRoot: root, inspectorUrl: await ownedInspectorUrl(pid, rendererPort), owner,
-        ref: process.env.ACCEPTANCE_FIXTURE_REF, packageSha256: pin.sha256, manifestSha256: pin.manifestSha256,
-    });
+export async function beginDraftFixture({ page, pid, executable, profile, root, rendererPort, owner, pin }) {
+    // Only the authenticated, hidden source renderer can open its main-process inspector.
+    let stage = "inspector-bridge";
+    try {
+        const main = await page.evaluate(async () => {
+            return (await window.happyDesktop.debugMainInspectorStart()).main;
+        });
+        assert(main?.status === "running" && typeof main.url === "string", "Owned main inspector did not start");
+        stage = "inspector-owner";
+        const inspectorUrl = await ownedInspectorUrl(pid, rendererPort);
+        assert.equal(inspectorUrl, main.url, "Inspector endpoint belongs to another process");
+        stage = "fixture-inputs";
+        return await attachUpdateFixture({
+            pid, executable, profile, assetsRoot: root, inspectorUrl, owner,
+            ref: process.env.ACCEPTANCE_FIXTURE_REF, packageSha256: pin.sha256, manifestSha256: pin.manifestSha256,
+        });
+    } catch (error) {
+        await page.evaluate(() => window.happyDesktop.debugMainInspectorStop()).catch(() => undefined);
+        if (error instanceof Error && !error.fixtureCode) error.fixtureCode = stage;
+        throw error;
+    }
 }
 
 export async function exerciseDraftRefusals({ fixture, page, check, select, button, verifySource }) {

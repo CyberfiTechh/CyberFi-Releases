@@ -300,7 +300,7 @@ async function main() {
         id(oldPid);
         const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === "ESRCH") return false; throw error; } };
         report.stage = "attach owned draft feed fixture";
-        fixture = await beginDraftFixture({ pid: oldPid, executable, profile, root, rendererPort: port, owner, pin: pins.target });
+        fixture = await beginDraftFixture({ page, pid: oldPid, executable, profile, root, rendererPort: port, owner, pin: pins.target });
         report.stage = "stable-only GUI desktop update check";
         await page.locator('[data-happy-desktop-ui="sidebar-footer"]').getByRole("button", { name: /^(Settings|Ayarlar|Open settings|Ayarları aç)$/iu }).click();
         const general = page.getByRole("button", { name: /^(General|Genel)$/iu }).first(); if (await general.count()) await general.click();
@@ -437,6 +437,10 @@ async function main() {
         report.success = true;
     } catch (error) {
         report.failedStage = report.stage;
+        if (report.stage === "attach owned draft feed fixture" &&
+            /^(?:inspector-(?:bridge|owner|transport)|fixture-(?:inputs|identity|install))$/u.test(error?.fixtureCode ?? "")) {
+            report.fixtureAttachFailure = error.fixtureCode;
+        }
         report.failureCode = error?.name === "AssertionError" ? "assertion_failed" : error?.name === "TimeoutError" ? "ui_timeout" : error?.name === "AbortError" ? "operation_timeout" : "native_operation_failed";
         report.errors.push("Native update acceptance failed");
         if (page && !page.isClosed()) await page.screenshot({ path: join(evidence, "failure.png"), mask: [page.locator('input[name="username"], input[name="password"]'), page.getByText(username, { exact: true })] }).catch(() => undefined);

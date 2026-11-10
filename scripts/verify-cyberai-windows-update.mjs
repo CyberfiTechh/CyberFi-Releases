@@ -50,6 +50,15 @@ function updateMonitorKind(error, phase) {
     if (phase === "renderer-poll" && rendererClosedDuringUpdate(error)) return "renderer-closed";
     return phase === "process-poll" ? "process-poll-error" : "unexpected-renderer-error";
 }
+
+function fixtureAttachFailure(error) {
+    const allowed = new Set([
+        "inspector-bridge", "inspector-loopback", "inspector-owner", "fixture-inputs",
+        "inspector-transport", "fixture-identity", "fixture-install",
+    ]);
+    if (allowed.has(error?.fixtureCode)) return error.fixtureCode;
+    return "fixture-attach-unclassified";
+}
 function publishedReleaseMatches(release, releaseId, tag) {
     return release?.id === releaseId && release?.draft === false && release?.tag_name === tag;
 }
@@ -392,7 +401,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         assert.equal((await page.evaluate(() => window.happyDesktop.runtimeGet())).phase, "ready");
         const oldPid = await listenerPid(); id(oldPid); report.oldPid = oldPid;
         stage = "attach owned draft feed fixture";
-        fixture = await beginDraftFixture({ pid: oldPid, executable, profile, root, rendererPort: port, owner, pin: pins.target });
+        fixture = await beginDraftFixture({ page, pid: oldPid, executable, profile, root, rendererPort: port, owner, pin: pins.target });
         const oldExecutableHash = await hashFile(executable);
         stage = "stable-only GUI desktop update check";
         await page.locator('[data-happy-desktop-ui="sidebar-footer"]').getByRole("button", { name: /^(Settings|Ayarlar|Open settings|Ayarları aç)$/iu }).click();
@@ -530,6 +539,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         report.actualInstallation = true; report.targetManuallyLaunched = false; report.authenticatedTargetChat = true; report.profilePreserved = true; report.success = true;
     } catch (error) {
         report.failedStage = stage; report.errors.push("Native update acceptance failed"); report.commandFailure = error.cyberaiCommand;
+        if (stage === "attach owned draft feed fixture") report.fixtureAttachFailure = fixtureAttachFailure(error);
         if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines.windows[2] && error.cyberaiCommand.verb === "start") {
             const logPath = join(paths.happyHome, "agent", "daemon.log");
             const log = await lstat(logPath).catch(() => undefined);
@@ -596,6 +606,8 @@ if (process.argv.includes("--self-test")) {
     assert(!rendererClosedDuringUpdate(Error("permission denied")));
     assert.equal(updateMonitorKind(Error("page.evaluate: Target page, context or browser has been closed"), "process-poll"), "process-poll-error");
     assert.equal(updateMonitorKind({ cyberfiUpdateFailure: "updater-error", message: "page.evaluate: Target page, context or browser has been closed" }, "renderer-poll"), "updater-error");
+    assert.equal(fixtureAttachFailure({ fixtureCode: "inspector-owner" }), "inspector-owner");
+    assert.equal(fixtureAttachFailure({ fixtureCode: "arbitrary detail" }), "fixture-attach-unclassified");
 
     assert(publishedReleaseMatches({ id: 1, tag_name: "v" + VERSION, draft: false }, 1, "v" + VERSION));
     assert(!publishedReleaseMatches({ id: 1, tag_name: "v" + VERSION, draft: true }, 1, "v" + VERSION));

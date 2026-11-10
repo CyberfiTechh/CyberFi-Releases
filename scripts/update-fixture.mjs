@@ -222,12 +222,16 @@ export async function attachUpdateFixture(options) {
     const fixture = await checkedAssets(assets, process.platform, process.arch, packageSha256, manifestSha256);
     const expected = { pid, executable: binary, profile, owner, platform: process.platform, arch: process.arch, ref,
         repository: REPOSITORY, sourceVersion: SOURCE_VERSION, sid: process.env.CYBERFI_TEST_EXPECTED_SID };
-    const inspector = await connectInspector(inspectorUrl);
+    let inspector, stage = "inspector-transport";
     try {
+        inspector = await connectInspector(inspectorUrl);
+        stage = "fixture-identity";
         assert.equal(await inspector.evaluate(call(verifyOwnedSource, expected)), true);
+        stage = "fixture-install";
         assert.equal(await inspector.evaluate(call(installFetchFixture, fixture)), true);
     } catch (error) {
-        inspector.close();
+        inspector?.close();
+        if (error instanceof Error) error.fixtureCode = stage;
         throw error;
     }
     return {
