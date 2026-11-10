@@ -1,5 +1,5 @@
-name: Verify CyberAI published native automatic update
-run-name: CyberAI 128 to 129 automatic update ${{ inputs.target }}
+name: Verify CyberAI native draft automatic update
+run-name: CyberAI 131 to 132 draft automatic update ${{ inputs.target }}
 on:
     workflow_dispatch:
         inputs:
@@ -7,14 +7,22 @@ on:
                 type: choice
                 options: [windows, macos-x64, macos-arm64]
                 required: true
+            source_sha:
+                description: Reviewed CyberFi source commit
+                type: string
+                required: true
+            target_pins:
+                description: Signed draft package and manifest pins
+                type: string
+                required: true
 permissions:
     contents: read
 jobs:
     native:
-        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/codex/cyberfi-132-updater'
         permissions:
-            contents: read # Both pinned source and target must already be public.
-        runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-15' || 'macos-15-intel' }}
+            contents: write # GitHub requires write permission to read an exact draft asset.
+        runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-26' || 'macos-15-intel' }}
         timeout-minutes: 35
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -61,10 +69,12 @@ jobs:
               env:
                   TARGET: ${{ inputs.target }}
                   ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
-                  ACCEPTANCE_SOURCE_SHA: b4c6aa448381907d0a6459886a91f1800b92236a
+                  ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+                  ACCEPTANCE_FIXTURE_REF: refs/heads/codex/cyberfi-132-updater
+                  ACCEPTANCE_ARTIFACTS: ${{ inputs.target_pins }}
                   GH_TOKEN: ${{ github.token }}
-                  CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI125_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
-                  CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI125_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+                  CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI132_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+                  CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI132_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
               run: |
                   if [[ "$TARGET" == "windows" ]]; then
                     powershell.exe -NoLogo -NoProfile -NonInteractive -File "$GITHUB_WORKSPACE/acceptance/scripts/windows-owned-launch.ps1" -RunUpdate
