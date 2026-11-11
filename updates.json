@@ -1,5 +1,26 @@
 [
   {
+    "tag_name": "v0.0.134",
+    "draft": false,
+    "assets": [
+      {
+        "id": 737215955,
+        "name": "CyberFi-0.0.134-x64.exe",
+        "state": "uploaded"
+      },
+      {
+        "id": 737226277,
+        "name": "CyberFi-0.0.134-x64.exe.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 737226451,
+        "name": "CyberFi-0.0.134-x64.exe.update.json",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "v0.0.133",
     "draft": false,
     "assets": [
