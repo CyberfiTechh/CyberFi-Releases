@@ -71,6 +71,44 @@ function Get-FixtureEntries([IO.DirectoryInfo]$Directory) {
     }
 }
 
+function Get-OwnedCleanupAcl($Entry, [string[]]$TrustedOwnerSids) {
+    if ($Entry.LinkType) { throw 'A linked entry cannot be modified during fixture cleanup.' }
+    $acl = Get-Acl -LiteralPath $Entry.FullName
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin $TrustedOwnerSids) { throw 'Unexpected scratch owner.' }
+    return $acl
+}
+
+function Remove-OwnedFixtureEntry($Entry, [string]$OwnedRoot, [Security.Principal.SecurityIdentifier]$AdminSid, [string[]]$TrustedOwnerSids) {
+    $path = $Entry.FullName
+    if ($path -ine $OwnedRoot -and -not $path.StartsWith($OwnedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Fixture cleanup escaped its exact owned root.'
+    }
+    $checked = Get-OwnedEntry $path $Entry.PSIsContainer
+    $readOnly = -not $checked.PSIsContainer -and ($checked.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0
+    $delete = {
+        if ($checked.PSIsContainer) { [IO.Directory]::Delete($checked.FullName, $false) }
+        else {
+            if ($readOnly) {
+                $null = Get-OwnedCleanupAcl $checked $TrustedOwnerSids
+                $checked.IsReadOnly = $false
+            }
+            [IO.File]::Delete($checked.FullName)
+        }
+    }
+    try { & $delete }
+    catch {
+        if ($_.Exception.GetBaseException() -isnot [UnauthorizedAccessException]) { throw }
+        $checked = Get-OwnedEntry $path $Entry.PSIsContainer
+        $acl = Get-OwnedCleanupAcl $checked $TrustedOwnerSids
+        $rights = [Security.AccessControl.FileSystemRights]'Delete,WriteAttributes'
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($AdminSid, $rights, 'Allow'))
+        Set-Acl -LiteralPath $checked.FullName -AclObject $acl
+        $checked = Get-OwnedEntry $path $Entry.PSIsContainer
+        & $delete
+    }
+}
+
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -92,7 +130,7 @@ try {
         $report.mode = 'native-update'
         $report.Remove('guiLaunched')
         $report.stage = 'verify-update-ref'
-        if ($env:GITHUB_REF -cne 'refs/heads/main' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
+        if ($env:GITHUB_REF -cne $env:ACCEPTANCE_FIXTURE_REF -or $env:ACCEPTANCE_FIXTURE_REF -cnotmatch '^refs/heads/main$' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
             throw 'The native update acceptance requires the reviewed Windows main workflow.'
         }
         $report.stage = 'verify-update-target'
@@ -497,7 +535,7 @@ exit 23
         foreach ($name in 'SystemDrive', 'ComSpec', 'PATHEXT', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'CommonProgramFiles',
             'CommonProgramFiles(x86)', 'CommonProgramW6432', 'ProgramData', 'ALLUSERSPROFILE', 'PUBLIC', 'COMPUTERNAME', 'OS',
             'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'NUMBER_OF_PROCESSORS', 'SESSIONNAME', 'GITHUB_ACTIONS', 'GITHUB_REPOSITORY',
-            'GITHUB_REF', 'GITHUB_WORKSPACE', 'RUNNER_ENVIRONMENT', 'TARGET', 'ARCH', 'ACCEPTANCE_SOURCE_SHA') {
+            'GITHUB_REF', 'GITHUB_WORKSPACE', 'RUNNER_ENVIRONMENT', 'TARGET', 'ARCH', 'ACCEPTANCE_SOURCE_SHA', 'ACCEPTANCE_FIXTURE_REF', 'ACCEPTANCE_ARTIFACTS') {
             $value = [Environment]::GetEnvironmentVariable($name)
             if ($null -ne $value) { $environment[$name] = $value }
         }
@@ -595,7 +633,7 @@ exit 23
                     $sourceEvidence = Join-Path $testRoot 'evidence'
                     if (Test-Path -LiteralPath $sourceEvidence) {
                         $sourceEvidence = (Get-OwnedEntry $sourceEvidence $true).FullName
-                        foreach ($name in 'automatic-update.json', 'actual-source-update.webm', 'actual-auto-reopened-target.webm', 'authenticated-target.png', 'failure.png') {
+                        foreach ($name in 'automatic-update.json', 'actual-source-update.webm', 'actual-auto-reopened-target.webm', 'authenticated-target.png', 'stable-update-offer.png', 'failure.png') {
                             $path = Join-Path $sourceEvidence $name
                             if (Test-Path -LiteralPath $path) {
                                 $item = Get-OwnedEntry $path $false
@@ -610,20 +648,11 @@ exit 23
             # Validate the full tree before deletion and recheck each literal entry.
             # The walk emits children first and never follows reparse points.
             $entries = @(Get-FixtureEntries $directory)
+            $trustedOwners = @($identity.User.Value, $accountSid.Value, 'S-1-5-18', 'S-1-5-32-544')
             foreach ($entry in $entries) {
-                $checked = Get-OwnedEntry $entry.FullName $entry.PSIsContainer
-                if ($checked.PSIsContainer) { [IO.Directory]::Delete($checked.FullName, $false) }
-                else {
-                    $relative = $checked.FullName.Substring($directory.FullName.Length + 1)
-                    # The daemon creates its managed docs and skills as read-only.
-                    if ($relative -match '^tmp\\hdg\\g-[a-f0-9]{8}\\[.]happy\\(?:docs|skills)\\' -and
-                        ($checked.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -and -not $checked.LinkType) {
-                        $checked.IsReadOnly = $false
-                    }
-                    [IO.File]::Delete($checked.FullName)
-                }
+                Remove-OwnedFixtureEntry $entry $ownedRoot $identity.User $trustedOwners
             }
-            [IO.Directory]::Delete($directory.FullName, $false)
+            Remove-OwnedFixtureEntry $directory $ownedRoot $identity.User $trustedOwners
             $report.fixtureRemoved = $true
         } catch {
             $report.fixtureRemoved = $false

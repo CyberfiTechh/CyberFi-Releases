@@ -1,0 +1,92 @@
+name: Verify CyberAI native draft automatic update
+run-name: CyberAI 132 to 133 draft automatic update ${{ inputs.target }}
+on:
+    workflow_dispatch:
+        inputs:
+            target:
+                type: choice
+                options: [windows, macos-x64, macos-arm64]
+                required: true
+            source_sha:
+                description: Reviewed CyberFi source commit
+                type: string
+                required: true
+            target_pins:
+                description: Signed draft package and manifest pins
+                type: string
+                required: true
+permissions:
+    contents: read
+jobs:
+    native:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        permissions:
+            contents: write # GitHub requires write permission to read an exact draft asset.
+        runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || inputs.target == 'macos-arm64' && 'macos-26' || 'macos-15-intel' }}
+        timeout-minutes: 35
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: acceptance
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  version: 10.28.1
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Install existing hidden launcher and recording dependencies
+              working-directory: upstream
+              shell: bash
+              env:
+                  PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/cyberfi-update-playwright
+              run: |
+                  pnpm install --frozen-lockfile --ignore-scripts
+                  pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
+                  echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+            - name: Select the shared Windows recording executable
+              if: inputs.target == 'windows'
+              shell: pwsh
+              run: |
+                  $cache = Get-Item -LiteralPath $env:PLAYWRIGHT_BROWSERS_PATH
+                  $expected = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'cyberfi-update-playwright'))
+                  if ($cache.FullName -ne $expected -or ($cache.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid owned ffmpeg cache' }
+                  $ffmpeg = @(Get-ChildItem -LiteralPath $cache.FullName -Directory -Filter 'ffmpeg-*' |
+                      Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+                      ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName 'ffmpeg-win64.exe') -ErrorAction SilentlyContinue })
+                  if ($ffmpeg.Count -ne 1 -or $ffmpeg[0].PSIsContainer -or ($ffmpeg[0].Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Exactly one owned ffmpeg executable is required' }
+                  "HAPPY_DESKTOP_GYM_FFMPEG=$($ffmpeg[0].FullName)" >> $env:GITHUB_ENV
+            - name: Verify real GUI download, install, automatic reopen and protected login
+              working-directory: upstream
+              shell: bash
+              env:
+                  TARGET: ${{ inputs.target }}
+                  ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
+                  ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+                  ACCEPTANCE_FIXTURE_REF: refs/heads/main
+                  ACCEPTANCE_ARTIFACTS: ${{ inputs.target_pins }}
+                  GH_TOKEN: ${{ github.token }}
+                  CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI133_{0}_USERNAME', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+                  CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI133_{0}_PASSWORD', inputs.target == 'windows' && 'WINDOWS' || inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+              run: |
+                  if [[ "$TARGET" == "windows" ]]; then
+                    powershell.exe -NoLogo -NoProfile -NonInteractive -File "$GITHUB_WORKSPACE/acceptance/scripts/windows-owned-launch.ps1" -RunUpdate
+                  else
+                    node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-cyberai-macos-update.mjs" "$GITHUB_WORKSPACE/upstream"
+                  fi
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberAI-automatic-update-${{ inputs.target }}
+                  path: |
+                      ${{ runner.temp }}/cyberfi-windows-owned-evidence
+                      ${{ runner.temp }}/cyberfi-macos-app-update/evidence
+                  retention-days: 7
+                  include-hidden-files: false
