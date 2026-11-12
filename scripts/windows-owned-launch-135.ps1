@@ -1,6 +1,7 @@
-param([switch]$SelfTest, [switch]$RunUpdate)
+param([switch]$SelfTest, [switch]$RunUpdate, [switch]$EngineColdStarts)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if ($EngineColdStarts -and -not $RunUpdate) { throw 'The engine probe requires the reviewed native fixture boundary.' }
 
 $report = [ordered]@{
     success = $false
@@ -127,7 +128,7 @@ try {
         throw 'The runner workspace or temporary directory is unexpected.'
     }
     if ($RunUpdate) {
-        $report.mode = 'native-update'
+        $report.mode = if ($EngineColdStarts) { 'native-engine-cold-starts' } else { 'native-update' }
         $report.Remove('guiLaunched')
         $report.stage = 'verify-update-ref'
         if ($env:GITHUB_REF -cne $env:ACCEPTANCE_FIXTURE_REF -or $env:ACCEPTANCE_FIXTURE_REF -cnotmatch '^refs/heads/main$' -or $env:GITHUB_SHA -cnotmatch '^[a-f0-9]{40}$') {
@@ -138,18 +139,20 @@ try {
             throw 'Unexpected native update target or source revision.'
         }
         $report.stage = 'verify-update-credentials'
-        foreach ($name in 'GH_TOKEN', 'CYBERAI_USERNAME', 'CYBERAI_PASSWORD') {
+        $credentialNames = if ($EngineColdStarts) { @('GH_TOKEN') } else { @('GH_TOKEN', 'CYBERAI_USERNAME', 'CYBERAI_PASSWORD') }
+        foreach ($name in $credentialNames) {
             $portalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
             [Environment]::SetEnvironmentVariable($name, $null, 'Process')
         }
-        if (-not $portalEnvironment.GH_TOKEN -or -not $portalEnvironment.CYBERAI_USERNAME -or
-            $portalEnvironment.CYBERAI_USERNAME -ieq 'admin' -or $portalEnvironment.CYBERAI_PASSWORD.Length -lt 8) {
+        if (-not $portalEnvironment.GH_TOKEN -or (-not $EngineColdStarts -and (-not $portalEnvironment.CYBERAI_USERNAME -or
+            $portalEnvironment.CYBERAI_USERNAME -ieq 'admin' -or $portalEnvironment.CYBERAI_PASSWORD.Length -lt 8))) {
             throw 'The native update acceptance requires disposable portal credentials.'
         }
         $report.stage = 'verify-acceptance-checkout-path'
         $null = Get-OwnedEntry $acceptance $true
         $null = Get-OwnedEntry $PSScriptRoot $true
-        $updateScript = (Get-OwnedEntry (Join-Path $PSScriptRoot 'verify-cyberai-windows-update-135.mjs') $false).FullName
+        $scriptName = if ($EngineColdStarts) { 'verify-cyberfi-engine-coldstarts-135.mjs' } else { 'verify-cyberai-windows-update-135.mjs' }
+        $updateScript = (Get-OwnedEntry (Join-Path $PSScriptRoot $scriptName) $false).FullName
         $report.stage = 'verify-upstream-checkout-path'
         $upstream = (Get-OwnedEntry (Join-Path $workspace 'upstream') $true).FullName
         $report.stage = 'resolve-update-git'
@@ -160,7 +163,7 @@ try {
         $report.gitExitCode = $LASTEXITCODE
         if ($LASTEXITCODE -ne 0 -or $acceptanceHead -cne $env:GITHUB_SHA) { throw 'Unexpected acceptance revision.' }
         $report.stage = 'verify-acceptance-script-diff'
-        & $git -C $acceptance diff --quiet HEAD -- scripts/windows-owned-launch-135.ps1 scripts/verify-cyberai-windows-update-135.mjs scripts/native-fixture-hooks-135.mjs scripts/native-fixture-review-135.json scripts/update-fixture-135.mjs .github/workflows/verify-cyberfi-135-windows-update.yml 2>$null
+        & $git -C $acceptance diff --quiet HEAD -- scripts/windows-owned-launch-135.ps1 scripts/verify-cyberai-windows-update-135.mjs scripts/verify-cyberfi-engine-coldstarts-135.mjs scripts/native-fixture-hooks-135.mjs scripts/native-fixture-review-135.json scripts/update-fixture-135.mjs .github/workflows/verify-cyberfi-135-windows-update.yml .github/workflows/verify-cyberfi-135-windows-engine-coldstarts.yml 2>$null
         $report.gitExitCode = $LASTEXITCODE
         if ($LASTEXITCODE -ne 0) { throw 'The reviewed acceptance scripts were modified.' }
         $report.stage = 'verify-upstream-head'
@@ -633,14 +636,15 @@ exit 23
                     $sourceEvidence = Join-Path $testRoot 'evidence'
                     if (Test-Path -LiteralPath $sourceEvidence) {
                         $sourceEvidence = (Get-OwnedEntry $sourceEvidence $true).FullName
-                        foreach ($name in 'automatic-update.json', 'actual-source-update.webm', 'actual-auto-reopened-target.webm', 'authenticated-target.png', 'stable-update-offer.png', 'failure.png') {
+                        foreach ($name in 'automatic-update.json', 'engine-cold-starts.json', 'engine-stderr-1.txt', 'engine-stderr-2.txt', 'engine-stderr-3.txt', 'actual-source-update.webm', 'actual-auto-reopened-target.webm', 'authenticated-target.png', 'stable-update-offer.png', 'failure.png') {
                             $path = Join-Path $sourceEvidence $name
                             if (Test-Path -LiteralPath $path) {
                                 $item = Get-OwnedEntry $path $false
                                 [IO.File]::Copy($item.FullName, (Join-Path $artifactRoot.FullName $name), $false)
                             }
                         }
-                        $report.evidencePreserved = [IO.File]::Exists((Join-Path $artifactRoot.FullName 'automatic-update.json'))
+                        $evidenceName = if ($EngineColdStarts) { 'engine-cold-starts.json' } else { 'automatic-update.json' }
+                        $report.evidencePreserved = [IO.File]::Exists((Join-Path $artifactRoot.FullName $evidenceName))
                     }
                 }
             }

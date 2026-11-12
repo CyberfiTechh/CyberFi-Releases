@@ -1,0 +1,114 @@
+name: Verify CyberFi 135 Windows engine cold starts
+run-name: CyberFi 127 engine three fresh Windows private homes
+on:
+    workflow_dispatch:
+        inputs:
+            source_sha:
+                description: Reviewed CyberFi 135 source commit
+                type: string
+                required: true
+            target_pins:
+                description: Signed 135 draft package, manifest and reviewed app.asar SHA-256 pins
+                type: string
+                required: true
+permissions:
+    contents: read
+jobs:
+    native:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        permissions:
+            contents: write # GitHub requires write permission to read an exact draft asset.
+        runs-on: windows-2025
+        timeout-minutes: 35
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: acceptance
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  version: 10.28.1
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Guard reviewed source and exact draft pin inputs
+              shell: pwsh
+              env:
+                  ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+                  ACCEPTANCE_ARTIFACTS: ${{ inputs.target_pins }}
+                  ACCEPTANCE_FIXTURE_REF: refs/heads/main
+              run: |
+                  @'
+                  import { reviewedDraftPins } from "./acceptance/scripts/native-fixture-hooks-135.mjs";
+                  reviewedDraftPins("windows");
+                  console.log("Reviewed 135 source and exact Windows target pin inputs accepted.");
+                  '@ | node --input-type=module
+                  if ($LASTEXITCODE -ne 0) { throw 'Reviewed Windows update inputs were refused.' }
+            - name: Verify repository-scoped draft transport before native account creation
+              shell: pwsh
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+                  $original = Invoke-WebRequest -Uri 'https://api.github.com/repos/CyberfiTechh/CyberFi-Engine/releases/442894294' -Headers $headers -SkipHttpErrorCheck
+                  $carrier = Invoke-WebRequest -Uri 'https://api.github.com/repos/CyberfiTechh/CyberFi-Releases/releases/443152400' -Headers $headers -SkipHttpErrorCheck
+                  Write-Output ("Original engine draft metadata HTTP status: " + [int]$original.StatusCode)
+                  Write-Output ("Own QA carrier draft metadata HTTP status: " + [int]$carrier.StatusCode)
+                  if ([int]$carrier.StatusCode -ne 200) { throw 'Own QA carrier draft is unavailable to the repository token.' }
+                  $review = Get-Content -LiteralPath 'acceptance/scripts/native-fixture-review-135.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+                  $release = $carrier.Content | ConvertFrom-Json
+                  $pin = $review.engineCarriers.windows
+                  $assets = @($release.assets | Where-Object { $_.id -eq $pin.assetId })
+                  if (-not $release.draft -or $release.tag_name -cne 'v0.0.135' -or $assets.Count -ne 1 -or
+                      $assets[0].name -cne $pin.name -or $assets[0].digest -cne ('sha256:' + $pin.sha256) -or $assets[0].size -ne $pin.size) {
+                      throw 'The exact reviewed QA engine carrier is required.'
+                  }
+            - name: Install existing hidden launcher and recording dependencies
+              working-directory: upstream
+              shell: pwsh
+              env:
+                  PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/cyberfi-update-playwright
+              run: |
+                  pnpm.cmd install --frozen-lockfile --ignore-scripts
+                  if ($LASTEXITCODE -ne 0) { throw 'Pinned upstream dependency install failed.' }
+                  pnpm.cmd --dir packages/happy-desktop-gym exec playwright install ffmpeg
+                  if ($LASTEXITCODE -ne 0) { throw 'Pinned recording dependency install failed.' }
+                  "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH" >> $env:GITHUB_ENV
+            - name: Select the shared Windows recording executable
+              shell: pwsh
+              run: |
+                  $cache = Get-Item -LiteralPath $env:PLAYWRIGHT_BROWSERS_PATH
+                  $expected = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'cyberfi-update-playwright'))
+                  if ($cache.FullName -ne $expected -or ($cache.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid owned ffmpeg cache' }
+                  $ffmpeg = @(Get-ChildItem -LiteralPath $cache.FullName -Directory -Filter 'ffmpeg-*' |
+                      Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+                      ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName 'ffmpeg-win64.exe') -ErrorAction SilentlyContinue })
+                  if ($ffmpeg.Count -ne 1 -or $ffmpeg[0].PSIsContainer -or ($ffmpeg[0].Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Exactly one owned ffmpeg executable is required' }
+                  "HAPPY_DESKTOP_GYM_FFMPEG=$($ffmpeg[0].FullName)" >> $env:GITHUB_ENV
+            - name: Verify three fresh native engine homes and strict ACL diagnostics
+              working-directory: upstream
+              shell: pwsh
+              env:
+                  TARGET: windows
+                  ARCH: x64
+                  ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+                  ACCEPTANCE_FIXTURE_REF: refs/heads/main
+                  ACCEPTANCE_ARTIFACTS: ${{ inputs.target_pins }}
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  & powershell.exe -NoLogo -NoProfile -NonInteractive -File "$env:GITHUB_WORKSPACE/acceptance/scripts/windows-owned-launch-135.ps1" -RunUpdate -EngineColdStarts
+                  if ($LASTEXITCODE -ne 0) { throw 'Native Windows engine cold-start diagnostic failed.' }
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberFi-135-Windows-engine-coldstarts
+                  path: ${{ runner.temp }}/cyberfi-windows-owned-evidence
+                  retention-days: 7
+                  include-hidden-files: false

@@ -720,7 +720,9 @@ $result|ConvertTo-Json -Depth 5 -Compress`;
     }
     assert(report.success, "Native Windows update incomplete; inspect automatic-update.json"); console.log(JSON.stringify({ success: true, evidence }));
 }
-if (process.argv.includes("--self-test")) {
+export { reviewedEngineCarrier, privateAclDiagnostic, ownedQaAclHomes, sanitizedEnvironment, environmentValue, hashFile, allowedRedirect };
+const directlyExecuted = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (directlyExecuted && process.argv.includes("--self-test")) {
     const review = JSON.parse(await readFile(new URL("./native-fixture-review-135.json", import.meta.url), "utf8"));
     const launcher = await readFile(new URL("./windows-owned-launch-135.ps1", import.meta.url), "utf8");
     const sourceGuards = [...launcher.matchAll(/\$env:ACCEPTANCE_SOURCE_SHA -cne '([a-f0-9]{40})'/gu)];
@@ -761,4 +763,4 @@ if (process.argv.includes("--self-test")) {
     assert.throws(() => allowedRedirect("https://api.github.com.evil.test/"));
     assert.throws(() => signedManifest({ sha256: "a".repeat(64), size: 10, signature: "A".repeat(512) }, "bad.exe", "a".repeat(64), 10));
     console.log("Windows fixed pins, redirects and RSA refusal guards passed; no app or network used.");
-} else await main();
+} else if (directlyExecuted) await main();
