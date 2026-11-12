@@ -198,7 +198,7 @@ async function main() {
         const gym = name => pathToFileURL(join(upstream, "packages/happy-desktop-gym/sources/electron", name + ".ts")).href;
         const { gymElectronProcessRun, gymElectronVideoRecord } = await import(gym("launch"));
         const { gymRunPathsCreate } = await import(gym("paths"));
-        
+
         const { happyAgentRuntimeCreate } = await import(gym("happyAgentRuntime"));
         ({ paths } = await gymRunPathsCreate("smoke"));
         report.stage = "production managed engine cache precondition";
