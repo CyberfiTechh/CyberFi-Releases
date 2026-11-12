@@ -38,6 +38,22 @@ function reviewedEngineCarrier(review) {
     assert.equal(carrier.size, 233311564);
     return carrier;
 }
+function privateAclDiagnostic(text) {
+    return {
+        accessDenied: /UnauthorizedAccessException|Access is denied|Attempted to perform an unauthorized operation/iu.test(text),
+        setAccessControl: /Exception calling ["']SetAccessControl["']/iu.test(text),
+        types: [...new Set(text.match(/\b(?:UnauthorizedAccessException|MethodInvocationException|SecurityException|TypeInitializationException|CommandNotFoundException)\b/gu) ?? [])],
+        hresults: [...new Set(text.match(/\b0x[0-9a-f]{8}\b/giu) ?? [])],
+    };
+}
+function ownedQaAclHomes(paths, fixtureRoot) {
+    assert(/^cf-launch-[a-f0-9]{32}$/u.test(basename(fixtureRoot)));
+    assert(paths.root.startsWith(join(fixtureRoot, "tmp", "hdg") + sep));
+    assert(/^g-[a-f0-9]{8}$/u.test(basename(paths.root)));
+    assert.equal(paths.home, join(paths.root, "home"));
+    assert.equal(paths.happyHome, join(paths.root, ".happy"));
+    return [paths.home, paths.happyHome];
+}
 const id = value => { assert(Number.isSafeInteger(value) && value > 0); return value; };
 const sha = value => { assert(typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)); return value; };
 function artifactPins(value, kind) {
@@ -350,7 +366,73 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         stage = "owned engine daemon startup";
         runtime = { stop };
         const engineStart = Date.now();
-        try { await command(engine, ["start"], { cwd: paths.root, env: engineEnv }); }
+        try {
+            try { await command(engine, ["start"], { cwd: paths.root, env: engineEnv }); }
+            catch (error) {
+                report.initialAclDiagnostic = privateAclDiagnostic(String(error.stderr ?? ""));
+                assert(report.initialAclDiagnostic.accessDenied && report.initialAclDiagnostic.setAccessControl,
+                    "An exact SetAccessControl AccessDenied must precede fixture-only ACL repair");
+                stage = "owned standard-user ACL permission proof";
+                ownedQaAclHomes(paths, dirname(await realpath(process.env.RUNNER_TEMP)));
+                const modifyProbe = join(paths.home, "acl-modify-proof"), fullProbe = join(paths.home, "acl-full-proof");
+                await mkdir(modifyProbe); await mkdir(fullProbe);
+                for (const path of [paths.home, paths.happyHome, modifyProbe, fullProbe]) {
+                    assert(path.startsWith(paths.root + sep) && await realpath(path) === path && !(await lstat(path)).isSymbolicLink());
+                }
+                const proofScript = String.raw`$ErrorActionPreference='Stop'
+$identity=[Security.Principal.WindowsIdentity]::GetCurrent();$sid=$identity.User
+$principal=[Security.Principal.WindowsPrincipal]::new($identity)
+if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Nonadmin probe required'}
+$groups=& (Join-Path $env:SystemRoot 'System32\whoami.exe') /groups /fo csv /nh
+$medium=($LASTEXITCODE -eq 0 -and ($groups -join '\n') -match 'S-1-16-8192')
+if(-not $medium){throw 'Exact medium-integrity probe required'}
+$ownedRoot=${quote(paths.root)};$expectedSid=${quote(nativeIdentity.sid)}
+if($sid.Value -cne $expectedSid){throw 'Unexpected probe SID'}
+function Owned([string]$path){
+ $target=Get-Item -LiteralPath $path -Force
+ if(-not $target.PSIsContainer -or ($target.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+  -not $target.FullName.StartsWith($ownedRoot+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Probe escaped exact owned root'}
+ if($target.GetAccessControl().GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $expectedSid){throw 'Probe is not owned by exact synthetic SID'}
+ return $target
+}
+function Grant([string]$path){
+ $target=Owned $path
+ # Request only the Access section: this fixture repair must not request WRITE_OWNER itself.
+ $acl=$target.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+ $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
+ $target.SetAccessControl($acl)
+}
+function Initialize([string]$path){
+ $target=Owned $path;$before=$target.GetAccessControl()
+ $rights=0;foreach($rule in $before.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){if($rule.IdentityReference.Value -ceq $expectedSid -and $rule.AccessControlType -eq 'Allow'){$rights=$rights -bor [int]$rule.FileSystemRights}}
+ $operation='SetOwner';$result=[ordered]@{success=$false;writeOwnerGranted=(($rights -band [int][Security.AccessControl.FileSystemRights]::TakeOwnership) -ne 0)}
+ try{
+  $acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetOwner($sid)
+  $acl.SetAccessRuleProtection($true,$false)
+  foreach($entry in @($sid,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'),[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($entry,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
+  $operation='SetAccessControl';$target.SetAccessControl($acl);$result.success=$true
+ }catch{
+  $base=$_.Exception.GetBaseException();$result.operation=$operation;$result.type=$base.GetType().Name;$result.hresult=$base.HResult
+  $result.accessDenied=($base -is [UnauthorizedAccessException] -or $base.HResult -eq -2147024891)
+ }
+ return [pscustomobject]$result
+}
+$modify=Initialize ${quote(modifyProbe)}
+Grant ${quote(fullProbe)}
+$full=Initialize ${quote(fullProbe)}
+$result=[ordered]@{nonAdmin=$true;mediumIntegrity=$medium;modify=$modify;fullControl=$full;scopedHomeRepair=$false}
+if($modify.success -or $modify.writeOwnerGranted -or -not $modify.accessDenied -or $modify.operation -cne 'SetAccessControl' -or -not $full.success -or -not $full.writeOwnerGranted){$result|ConvertTo-Json -Depth 5 -Compress;exit 0}
+Grant ${quote(paths.home)}
+Grant ${quote(paths.happyHome)}
+$result.scopedHomeRepair=$true
+$result|ConvertTo-Json -Depth 5 -Compress`;
+                report.aclPermissionProof = JSON.parse(await command(ps, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(proofScript, "utf16le").toString("base64")], { cwd: paths.root, env: engineEnv }));
+                assert(report.aclPermissionProof.scopedHomeRepair && report.aclPermissionProof.fullControl.success && report.aclPermissionProof.modify.accessDenied,
+                    "Fixture ACL cause must be proven before narrow HOME/HappyHome repair");
+                stage = "owned engine daemon startup after proven fixture HOME repair";
+                await command(engine, ["start"], { cwd: paths.root, env: engineEnv });
+            }
+        }
         finally { report.engineStartElapsedMs = Date.now() - engineStart; }
         stage = "owned engine authenticated health";
         let client; const healthDeadline = Date.now() + 30000;
@@ -582,7 +664,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         if (Number.isInteger(error.metadataHttpStatus) && error.metadataHttpStatus >= 100 && error.metadataHttpStatus <= 599) report.metadataHttpStatus = error.metadataHttpStatus;
         if (stage === "altered signature and bytes are refused" && error.draftRefusal) report.draftRefusalDiagnostic = error.draftRefusal;
         if (stage === "attach owned draft feed fixture") report.fixtureAttachFailure = fixtureAttachFailure(error);
-        if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines.windows[2] && error.cyberaiCommand.verb === "start") {
+        if (stage.startsWith("owned engine daemon startup") && error?.cyberaiCommand?.tool === engines.windows[2] && error.cyberaiCommand.verb === "start") {
             const logPath = join(paths.happyHome, "agent", "daemon.log");
             const log = await lstat(logPath).catch(() => undefined);
             const content = log?.isFile() && !log.isSymbolicLink() && log.size <= 65536 && await realpath(logPath).catch(() => undefined) === logPath
@@ -646,6 +728,13 @@ if (process.argv.includes("--self-test")) {
     assert.equal(sourceGuards[0][1], review.sourceCommit, "Launcher and JSON source pins must match");
     reviewedEngineCarrier(review);
     assert.throws(() => reviewedEngineCarrier({ ...review, engineCarriers: { windows: { ...review.engineCarriers.windows, sha256: "0".repeat(64) } } }));
+    assert.deepEqual(privateAclDiagnostic('Exception calling "SetAccessControl" with "1" argument(s): "Access is denied"\nUnauthorizedAccessException 0x80070005'), { accessDenied: true, setAccessControl: true, types: ["UnauthorizedAccessException"], hresults: ["0x80070005"] });
+    assert.equal(privateAclDiagnostic("encoded script mentions SetAccessControl but unrelated failure").setAccessControl, false);
+    const ownedRoot = join("fixture", "cf-launch-" + "a".repeat(32)), gymRoot = join(ownedRoot, "tmp", "hdg", "g-1234abcd");
+    const ownedHomes = { root: gymRoot, home: join(gymRoot, "home"), happyHome: join(gymRoot, ".happy") };
+    assert.equal(ownedQaAclHomes(ownedHomes, ownedRoot).length, 2);
+    assert.throws(() => ownedQaAclHomes({ ...ownedHomes, home: join("Users", "normal-profile") }, ownedRoot));
+    assert.throws(() => ownedQaAclHomes(ownedHomes, join("fixture", "unowned")));
     assert.deepEqual(sanitizedEnvironment({ CYBERAI_USERNAME: "private", CYBERAI_PASSWORD: "private", GH_TOKEN: "private", NODE_OPTIONS: "unsafe", SystemRoot: "C:\\Windows" }), { SystemRoot: "C:\\Windows" });
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Target page, context or browser has been closed\r\nCall log:")));
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Execution context was destroyed, most likely because of a navigation")));
