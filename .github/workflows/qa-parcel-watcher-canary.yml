@@ -1,0 +1,75 @@
+name: Build pinned Parcel watcher QA prerequisite
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watcher:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: slopus/happy-agent
+          ref: 3d672e414d70804cf9f1b20b44d7243c78e063c3
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify pinned source and existing Parcel patch
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -cne '3d672e414d70804cf9f1b20b44d7243c78e063c3') { throw 'Unexpected source' }
+          $patch = (Get-FileHash -Algorithm SHA256 -LiteralPath 'patches/@parcel__watcher@2.6.0.patch').Hash.ToLowerInvariant()
+          if ($patch -cne 'a595e20a32e8eff3ee4484f4fcb3c627b188f13e7dbd03be03547caf54ae4bbd') { throw 'Unexpected Parcel patch' }
+      - name: Install frozen dependencies without lifecycle scripts
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Rebuild only the patched Parcel watcher
+        shell: pwsh
+        run: |
+          pnpm --filter @slopus/happy-agent-modules rebuild @parcel/watcher
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --filter @slopus/happy-agent test:native:watcher
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Stage exact native binary and build provenance
+        shell: pwsh
+        run: |
+          @'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const {createRequire} = require('node:module');
+          const requireModules = createRequire(path.resolve('packages/happy-agent-modules/package.json'));
+          const entry = requireModules.resolve('@parcel/watcher');
+          const root = path.dirname(entry);
+          const binary = path.join(root, 'build/win32-x64/watcher.node');
+          const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+          if(manifest.version !== '2.6.0') throw Error('Unexpected watcher version');
+          const bytes = fs.readFileSync(binary);
+          const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+          fs.mkdirSync('qa-parcel-artifact');
+          fs.copyFileSync(binary, 'qa-parcel-artifact/watcher.node', fs.constants.COPYFILE_EXCL);
+          fs.writeFileSync('qa-parcel-artifact/provenance.json', JSON.stringify({
+            sourceRepository:'slopus/happy-agent', sourceCommit:'3d672e414d70804cf9f1b20b44d7243c78e063c3',
+            parcelVersion:manifest.version, parcelPatchSha256:'a595e20a32e8eff3ee4484f4fcb3c627b188f13e7dbd03be03547caf54ae4bbd',
+            runId:process.env.GITHUB_RUN_ID, workflowCommit:process.env.GITHUB_SHA,
+            nodeVersion:process.version, platform:process.platform, architecture:process.arch,
+            runnerImage:process.env.ImageVersion, bytes:bytes.length, sha256,
+            nativeNodeAndBunTestsPassed:true, releaseAssetsModified:false
+          },null,2)+'\n', {flag:'wx'});
+          '@ | node
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pinned-parcel-watcher-win32-x64-qa
+          path: qa-parcel-artifact/
+          if-no-files-found: error
+          retention-days: 7
