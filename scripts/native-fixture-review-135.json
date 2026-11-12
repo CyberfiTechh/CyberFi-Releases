@@ -1,0 +1,15 @@
+{
+  "sourceCommit": "8d15d870213ac0ab8f891b2130c748fd27e42044",
+  "targets": {
+    "windows": {
+      "releaseId": 443152400,
+      "assetId": 740035745,
+      "sha256": "3811e16515e06ebc9d5d6343e7197c9cd902c6fa8a476d7d18c2c2f801d21013",
+      "manifestAssetId": 740046456,
+      "manifestSha256": "29cd72339ce57e91880ea6acb0b179b60e3ad7d76958389e3ee5006a58b81e3e",
+      "appAsarSha256": "99aef59b76b037475c8fe49e9091c1fdf1c861245ab019d7d6fd81147ba321ac"
+    },
+    "x64": null,
+    "arm64": null
+  }
+}
