@@ -23,6 +23,21 @@ const PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
 const engines = {
     windows: [739341031, "64c1023c2fb96e2e0c8a73f6c10f6cf785a1dd2415637ef2b738de458dd98477", "happy-agent-win32-x64.exe"],
 };
+function reviewedEngineCarrier(review) {
+    const carrier = review.engineCarriers?.windows;
+    assert(carrier && Object.keys(carrier).sort().join(",") === "assetId,engineAssetId,engineReleaseId,engineRepository,engineSourceCommit,name,releaseId,repository,sha256,size");
+    assert.equal(carrier.repository, REPOSITORY);
+    assert.equal(carrier.releaseId, 443152400);
+    id(carrier.assetId);
+    assert.equal(carrier.engineRepository, "CyberfiTechh/CyberFi-Engine");
+    assert.equal(carrier.engineReleaseId, 442894294);
+    assert.equal(carrier.engineAssetId, 739341031);
+    assert.equal(carrier.engineSourceCommit, "62a29b5872534ba627412b7903fc8103fa629331");
+    assert.equal(carrier.name, "qa-only-native135-engine-0.4.127-win32-x64.tar.gz");
+    assert.equal(carrier.sha256, engines.windows[1]);
+    assert.equal(carrier.size, 233311564);
+    return carrier;
+}
 const id = value => { assert(Number.isSafeInteger(value) && value > 0); return value; };
 const sha = value => { assert(typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)); return value; };
 function artifactPins(value, kind) {
@@ -153,7 +168,8 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
     async function api(path) {
         assert.match(path, /^repos\/CyberfiTechh\/(CyberFi-Releases|CyberFi-Engine)\/releases\/[1-9][0-9]*$/u);
         const response = await fetch("https://api.github.com/" + path, { headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: "Bearer " + token } : {}) }, redirect: "error", signal: AbortSignal.timeout(45000) });
-        assert(response.ok, "Pinned GitHub metadata unavailable"); return response.json();
+        if (!response.ok) throw Object.assign(Error(`Pinned GitHub metadata unavailable (HTTP ${response.status})`), { metadataHttpStatus: response.status });
+        return response.json();
     }
     async function download(repository, asset, destination) {
         assert([REPOSITORY, "CyberfiTechh/CyberFi-Engine"].includes(repository)); id(asset.id);
@@ -257,12 +273,16 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             await watcherReady(watcher);
             visibilityDone.then(value => { if (value.onscreenSamples > 0 || value.activeSamples > 0) monitorError = Error("Owned window became visible or focused and was stopped"); }, () => { monitorError = Error("Native visibility observer failed"); });
         stage = "owned engine fixture";
-        const engineRelease = await api("repos/CyberfiTechh/CyberFi-Engine/releases/442894294"), [engineId, engineSha, engineName] = engines[target];
-        assert(engineRelease.tag_name === "v0.4.127" && engineRelease.target_commitish === "62a29b5872534ba627412b7903fc8103fa629331" && !engineRelease.prerelease);
-        const engineAsset = engineRelease.assets.find(item => item.id === engineId); assert.equal(engineAsset?.digest, "sha256:" + engineSha);
+        const carrier = reviewedEngineCarrier(JSON.parse(await readFile(new URL("./native-fixture-review-135.json", import.meta.url), "utf8")));
+        const engineRelease = await api(`repos/${carrier.repository}/releases/${carrier.releaseId}`), [, engineSha, engineName] = engines[target];
+        assertDraftRelease(engineRelease, "target", pins.target, "v" + VERSION, SOURCE_COMMIT);
+        const engineAsset = engineRelease.assets.find(item => item.id === carrier.assetId);
+        assert.equal(engineAsset?.name, carrier.name); assert.equal(engineAsset?.size, carrier.size);
+        assert.equal(engineAsset?.digest, "sha256:" + engineSha);
+        report.engineProvenance = carrier;
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
         stage = "owned engine archive download";
-        await download("CyberfiTechh/CyberFi-Engine", engineAsset, archive); assert.equal(await hashFile(archive), engineSha);
+        await download(carrier.repository, engineAsset, archive); assert.equal(await hashFile(archive), engineSha);
         // Git Bash's GNU tar can interpret a Windows drive prefix as a remote
         // archive. Select the OS-native extractor explicitly on both platforms.
         const tar = windows ? join(environmentValue(safeEnv, "SystemRoot"), "System32/tar.exe") : "/usr/bin/tar";
@@ -559,6 +579,7 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
         report.actualInstallation = true; report.targetManuallyLaunched = false; report.authenticatedTargetChat = true; report.profilePreserved = true; report.success = true;
     } catch (error) {
         report.failedStage = stage; report.errors.push("Native update acceptance failed"); report.commandFailure = error.cyberaiCommand;
+        if (Number.isInteger(error.metadataHttpStatus) && error.metadataHttpStatus >= 100 && error.metadataHttpStatus <= 599) report.metadataHttpStatus = error.metadataHttpStatus;
         if (stage === "altered signature and bytes are refused" && error.draftRefusal) report.draftRefusalDiagnostic = error.draftRefusal;
         if (stage === "attach owned draft feed fixture") report.fixtureAttachFailure = fixtureAttachFailure(error);
         if (stage === "owned engine daemon startup" && error?.cyberaiCommand?.tool === engines.windows[2] && error.cyberaiCommand.verb === "start") {
@@ -623,6 +644,8 @@ if (process.argv.includes("--self-test")) {
     const sourceGuards = [...launcher.matchAll(/\$env:ACCEPTANCE_SOURCE_SHA -cne '([a-f0-9]{40})'/gu)];
     assert.equal(sourceGuards.length, 1, "Exactly one reviewed launcher source guard is required");
     assert.equal(sourceGuards[0][1], review.sourceCommit, "Launcher and JSON source pins must match");
+    reviewedEngineCarrier(review);
+    assert.throws(() => reviewedEngineCarrier({ ...review, engineCarriers: { windows: { ...review.engineCarriers.windows, sha256: "0".repeat(64) } } }));
     assert.deepEqual(sanitizedEnvironment({ CYBERAI_USERNAME: "private", CYBERAI_PASSWORD: "private", GH_TOKEN: "private", NODE_OPTIONS: "unsafe", SystemRoot: "C:\\Windows" }), { SystemRoot: "C:\\Windows" });
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Target page, context or browser has been closed\r\nCall log:")));
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Execution context was destroyed, most likely because of a navigation")));

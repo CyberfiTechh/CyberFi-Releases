@@ -11,5 +11,19 @@
     },
     "x64": null,
     "arm64": null
+  },
+  "engineCarriers": {
+    "windows": {
+      "repository": "CyberfiTechh/CyberFi-Releases",
+      "releaseId": 443152400,
+      "assetId": 740133421,
+      "name": "qa-only-native135-engine-0.4.127-win32-x64.tar.gz",
+      "sha256": "64c1023c2fb96e2e0c8a73f6c10f6cf785a1dd2415637ef2b738de458dd98477",
+      "size": 233311564,
+      "engineRepository": "CyberfiTechh/CyberFi-Engine",
+      "engineReleaseId": 442894294,
+      "engineAssetId": 739341031,
+      "engineSourceCommit": "62a29b5872534ba627412b7903fc8103fa629331"
+    }
   }
 }
