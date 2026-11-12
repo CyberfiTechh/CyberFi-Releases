@@ -618,6 +618,11 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
     assert(report.success, "Native Windows update incomplete; inspect automatic-update.json"); console.log(JSON.stringify({ success: true, evidence }));
 }
 if (process.argv.includes("--self-test")) {
+    const review = JSON.parse(await readFile(new URL("./native-fixture-review-135.json", import.meta.url), "utf8"));
+    const launcher = await readFile(new URL("./windows-owned-launch-135.ps1", import.meta.url), "utf8");
+    const sourceGuards = [...launcher.matchAll(/\$env:ACCEPTANCE_SOURCE_SHA -cne '([a-f0-9]{40})'/gu)];
+    assert.equal(sourceGuards.length, 1, "Exactly one reviewed launcher source guard is required");
+    assert.equal(sourceGuards[0][1], review.sourceCommit, "Launcher and JSON source pins must match");
     assert.deepEqual(sanitizedEnvironment({ CYBERAI_USERNAME: "private", CYBERAI_PASSWORD: "private", GH_TOKEN: "private", NODE_OPTIONS: "unsafe", SystemRoot: "C:\\Windows" }), { SystemRoot: "C:\\Windows" });
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Target page, context or browser has been closed\r\nCall log:")));
     assert(rendererClosedDuringUpdate(Error("page.evaluate: Execution context was destroyed, most likely because of a navigation")));

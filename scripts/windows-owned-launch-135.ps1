@@ -134,7 +134,7 @@ try {
             throw 'The native update acceptance requires the reviewed Windows main workflow.'
         }
         $report.stage = 'verify-update-target'
-        if ($env:ACCEPTANCE_SOURCE_SHA -cne '99c5bcdf9b7ae19cb4b19aae46f7eec69281ea66' -or $env:TARGET -cne 'windows' -or $env:ARCH -cne 'x64') {
+        if ($env:ACCEPTANCE_SOURCE_SHA -cne '8d15d870213ac0ab8f891b2130c748fd27e42044' -or $env:TARGET -cne 'windows' -or $env:ARCH -cne 'x64') {
             throw 'Unexpected native update target or source revision.'
         }
         $report.stage = 'verify-update-credentials'
