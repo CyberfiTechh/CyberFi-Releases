@@ -9,8 +9,22 @@
       "manifestSha256": "29cd72339ce57e91880ea6acb0b179b60e3ad7d76958389e3ee5006a58b81e3e",
       "appAsarSha256": "99aef59b76b037475c8fe49e9091c1fdf1c861245ab019d7d6fd81147ba321ac"
     },
-    "x64": null,
-    "arm64": null
+    "x64": {
+      "releaseId": 443218651,
+      "assetId": 740207888,
+      "sha256": "12981873b4ebff0c7021e71b70678a6125412731275cdf8b7c91df268cfd226f",
+      "manifestAssetId": 740219249,
+      "manifestSha256": "13422314a29135bfccde729eb27d09619b67d248c636af9034147193091266f5",
+      "appAsarSha256": "40e9e2698b7fa5ef1d31e8debd01fc50ffc3b50e6dda1d378f2eb7275ecd6306"
+    },
+    "arm64": {
+      "releaseId": 443218651,
+      "assetId": 740219523,
+      "sha256": "6a7584e32327686f98992231811208ba72e2a33861432cd8890098385c98b483",
+      "manifestAssetId": 740230659,
+      "manifestSha256": "5da9198185d3bc4a773e4c85571244ebd613a1c5c273f45d52730877eed8e046",
+      "appAsarSha256": "f5c0ba8d3e60c57f088adbd9ed8cf46bb51ca72813748aaa94e101c709b5a57d"
+    }
   },
   "engineCarriers": {
     "windows": {
@@ -23,6 +37,30 @@
       "engineRepository": "CyberfiTechh/CyberFi-Engine",
       "engineReleaseId": 442894294,
       "engineAssetId": 739341031,
+      "engineSourceCommit": "62a29b5872534ba627412b7903fc8103fa629331"
+    },
+    "x64": {
+      "repository": "CyberfiTechh/CyberFi-Releases",
+      "releaseId": 443218651,
+      "assetId": 740248951,
+      "name": "qa-only-native135-engine-0.4.127-darwin-x64.tar.gz",
+      "sha256": "5ba46978dfdf993e9ea60fa34fbae9219e9f0316bd3c0df35f3d0e9d3f5ead0d",
+      "size": 204664391,
+      "engineRepository": "CyberfiTechh/CyberFi-Engine",
+      "engineReleaseId": 442894294,
+      "engineAssetId": 739364036,
+      "engineSourceCommit": "62a29b5872534ba627412b7903fc8103fa629331"
+    },
+    "arm64": {
+      "repository": "CyberfiTechh/CyberFi-Releases",
+      "releaseId": 443218651,
+      "assetId": 740263666,
+      "name": "qa-only-native135-engine-0.4.127-darwin-arm64.tar.gz",
+      "sha256": "cce0fd02a8cb9b08e28b2747c571d76c35a143d41448eac801ced8f6e1671cd2",
+      "size": 193793431,
+      "engineRepository": "CyberfiTechh/CyberFi-Engine",
+      "engineReleaseId": 442894294,
+      "engineAssetId": 739364032,
       "engineSourceCommit": "62a29b5872534ba627412b7903fc8103fa629331"
     }
   }

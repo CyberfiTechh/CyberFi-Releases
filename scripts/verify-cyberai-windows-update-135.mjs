@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { assertDraftRelease, beginDraftFixture, exerciseDraftRefusals, reviewedDraftPins } from "./native-fixture-hooks-135.mjs";
+import { assertDraftRelease, beginDraftFixture, exerciseDraftRefusals, reviewedDraftPins, pinnedEngineMetadata } from "./native-fixture-hooks-135.mjs";
 import { createHash, verify, randomBytes } from "node:crypto";
 import { constants, createReadStream, createWriteStream } from "node:fs";
 import { copyFile, chmod, mkdir, readFile, readdir, realpath, writeFile, lstat, stat } from "node:fs/promises";
@@ -192,7 +192,7 @@ $trust=Get-AuthenticodeSignature -LiteralPath $path
         assert(Number.isSafeInteger(asset.size) && asset.size > 0 && asset.size <= 256 * 1024 ** 2);
         let url = new URL(`https://api.github.com/repos/${repository}/releases/assets/${asset.id}`);
         for (let redirects = 0; redirects < 5; redirects++) {
-            const response = await fetch(url, { headers: { Accept: "application/octet-stream", ...(url.hostname === "api.github.com" && token ? { Authorization: "Bearer " + token } : {}) }, redirect: "manual", signal: AbortSignal.timeout(300000) });
+            const response = await fetch(url, { headers: { Accept: "application/octet-stream", ...(url.hostname === "api.github.com" && repository === REPOSITORY && token ? { Authorization: "Bearer " + token } : {}) }, redirect: "manual", signal: AbortSignal.timeout(300000) });
             if ([301, 302, 303, 307, 308].includes(response.status)) { url = allowedRedirect(response.headers.get("location")); continue; }
             assert(response.ok && response.body, "Pinned asset download unavailable"); let bytes = 0;
             await pipeline(Readable.fromWeb(response.body), new Transform({ transform(chunk, encoding, done) { bytes += chunk.length; done(bytes <= asset.size ? null : Error("Asset exceeded pinned size"), chunk); } }), createWriteStream(destination, { flags: "wx", mode: 0o600 }));
@@ -290,15 +290,12 @@ while(-not (Test-Path -LiteralPath $env:WATCH_STOP)) {
             visibilityDone.then(value => { if (value.onscreenSamples > 0 || value.activeSamples > 0) monitorError = Error("Owned window became visible or focused and was stopped"); }, () => { monitorError = Error("Native visibility observer failed"); });
         stage = "owned engine fixture";
         const carrier = reviewedEngineCarrier(JSON.parse(await readFile(new URL("./native-fixture-review-135.json", import.meta.url), "utf8")));
-        const engineRelease = await api(`repos/${carrier.repository}/releases/${carrier.releaseId}`), [, engineSha, engineName] = engines[target];
-        assertDraftRelease(engineRelease, "target", pins.target, "v" + VERSION, SOURCE_COMMIT);
-        const engineAsset = engineRelease.assets.find(item => item.id === carrier.assetId);
-        assert.equal(engineAsset?.name, carrier.name); assert.equal(engineAsset?.size, carrier.size);
-        assert.equal(engineAsset?.digest, "sha256:" + engineSha);
-        report.engineProvenance = carrier;
+        const engineMetadata = await pinnedEngineMetadata(carrier, token), [, engineSha, engineName] = engines[target];
+        const engineAsset = engineMetadata.asset;
+        report.engineProvenance = engineMetadata.provenance;
         const archive = join(root, "engine.tar.gz"), engineRoot = join(root, "engine"); await mkdir(engineRoot);
         stage = "owned engine archive download";
-        await download(carrier.repository, engineAsset, archive); assert.equal(await hashFile(archive), engineSha);
+        await download(engineMetadata.repository, engineAsset, archive); assert.equal(await hashFile(archive), engineSha);
         // Git Bash's GNU tar can interpret a Windows drive prefix as a remote
         // archive. Select the OS-native extractor explicitly on both platforms.
         const tar = windows ? join(environmentValue(safeEnv, "SystemRoot"), "System32/tar.exe") : "/usr/bin/tar";

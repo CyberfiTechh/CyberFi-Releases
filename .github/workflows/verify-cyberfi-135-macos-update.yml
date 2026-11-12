@@ -1,0 +1,102 @@
+name: Verify CyberFi 135 macOS draft automatic update
+run-name: CyberAI 133 to 135 draft automatic update ${{ inputs.target }}
+on:
+    workflow_dispatch:
+        inputs:
+            target:
+                type: choice
+                options: [macos-x64, macos-arm64]
+                required: true
+            source_sha:
+                description: Reviewed CyberFi source commit
+                type: string
+                required: true
+            target_pins:
+                description: Signed draft package and manifest pins
+                type: string
+                required: true
+permissions:
+    contents: read
+jobs:
+    native:
+        if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.event.repository.private == false && github.ref == 'refs/heads/main'
+        permissions:
+            contents: write # GitHub requires write permission to read an exact draft asset.
+        runs-on: ${{ inputs.target == 'macos-arm64' && 'macos-26' || 'macos-15-intel' }}
+        timeout-minutes: 35
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  path: acceptance
+                  persist-credentials: false
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+              with:
+                  repository: slopus/happy-desktop
+                  ref: c9feffb54cdb3591220dafced4070e118e3d297a
+                  path: upstream
+                  persist-credentials: false
+            - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
+              with:
+                  version: 10.28.1
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+              with:
+                  node-version: "24"
+                  package-manager-cache: false
+            - name: Guard exact source, architecture, UTF-8 inputs and own draft carrier
+              shell: bash
+              env:
+                  TARGET: ${{ inputs.target }}
+                  ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+                  ACCEPTANCE_FIXTURE_REF: refs/heads/main
+                  ACCEPTANCE_ARTIFACTS: ${{ inputs.target_pins }}
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  node --input-type=module <<'NODE'
+                  import assert from 'node:assert/strict';
+                  import { readFileSync } from 'node:fs';
+                  import { reviewedDraftPins, pinnedEngineMetadata } from './acceptance/scripts/native-fixture-hooks-135.mjs';
+                  for (const path of ['scripts/verify-cyberai-macos-update-135.mjs','scripts/native-fixture-hooks-135.mjs','scripts/update-fixture-135.mjs','scripts/native-fixture-review-135.json','.github/workflows/verify-cyberfi-135-macos-update.yml']) {
+                    const bytes=readFileSync('acceptance/'+path), text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+                    assert(!text.includes('\uFFFD')&&!text.includes('\r')&&bytes.subarray(0,3).toString('hex')!=='efbbbf','Strict UTF-8/LF fixture source required');
+                  }
+                  const arch=process.env.TARGET==='macos-x64'?'x64':process.env.TARGET==='macos-arm64'?'arm64':null;
+                  assert(arch); reviewedDraftPins(arch);
+                  const review=JSON.parse(readFileSync('acceptance/scripts/native-fixture-review-135.json','utf8')), pin=review.engineCarriers[arch];
+                  assert.equal(review.sourceCommit,'8d15d870213ac0ab8f891b2130c748fd27e42044');
+                  const selected=await pinnedEngineMetadata(pin,process.env.GH_TOKEN);
+                  console.log(JSON.stringify({architecture:arch,transport:selected.provenance.transport,originalMetadataHttpStatus:selected.provenance.originalMetadataHttpStatus,carrierMetadataHttpStatus:selected.provenance.carrierMetadataHttpStatus??null}));
+                  NODE
+                  node acceptance/scripts/verify-cyberai-macos-update-135.mjs --self-test
+                  node acceptance/scripts/engine-pinned-metadata-self-test-135.mjs
+            - name: Install existing hidden launcher and recording dependencies
+              working-directory: upstream
+              shell: bash
+              env:
+                  PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/cyberfi-update-playwright
+              run: |
+                  pnpm install --frozen-lockfile --ignore-scripts
+                  pnpm --dir packages/happy-desktop-gym exec playwright install ffmpeg
+                  echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+            - name: Verify real GUI download, install, automatic reopen and protected login
+              working-directory: upstream
+              shell: bash
+              env:
+                  TARGET: ${{ inputs.target }}
+                  ARCH: ${{ inputs.target == 'macos-arm64' && 'arm64' || 'x64' }}
+                  ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+                  ACCEPTANCE_FIXTURE_REF: refs/heads/main
+                  ACCEPTANCE_ARTIFACTS: ${{ inputs.target_pins }}
+                  GH_TOKEN: ${{ github.token }}
+                  CYBERAI_USERNAME: ${{ secrets[format('CYBERAI_CI135_{0}_USERNAME', inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+                  CYBERAI_PASSWORD: ${{ secrets[format('CYBERAI_CI135_{0}_PASSWORD', inputs.target == 'macos-x64' && 'MACOS_X64' || 'MACOS_ARM64')] }}
+              run: |
+                  node --import tsx "$GITHUB_WORKSPACE/acceptance/scripts/verify-cyberai-macos-update-135.mjs" "$GITHUB_WORKSPACE/upstream"
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              if: always()
+              with:
+                  name: CyberFi-133-to-135-automatic-update-${{ inputs.target }}
+                  path: |
+                      ${{ runner.temp }}/cyberfi-macos-app-update/evidence
+                  retention-days: 7
+                  include-hidden-files: false

@@ -56,20 +56,17 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
-                  $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
-                  $original = Invoke-WebRequest -Uri 'https://api.github.com/repos/CyberfiTechh/CyberFi-Engine/releases/442894294' -Headers $headers -SkipHttpErrorCheck
-                  $carrier = Invoke-WebRequest -Uri 'https://api.github.com/repos/CyberfiTechh/CyberFi-Releases/releases/443152400' -Headers $headers -SkipHttpErrorCheck
-                  Write-Output ("Original engine draft metadata HTTP status: " + [int]$original.StatusCode)
-                  Write-Output ("Own QA carrier draft metadata HTTP status: " + [int]$carrier.StatusCode)
-                  if ([int]$carrier.StatusCode -ne 200) { throw 'Own QA carrier draft is unavailable to the repository token.' }
-                  $review = Get-Content -LiteralPath 'acceptance/scripts/native-fixture-review-135.json' -Raw -Encoding UTF8 | ConvertFrom-Json
-                  $release = $carrier.Content | ConvertFrom-Json
-                  $pin = $review.engineCarriers.windows
-                  $assets = @($release.assets | Where-Object { $_.id -eq $pin.assetId })
-                  if (-not $release.draft -or $release.tag_name -cne 'v0.0.135' -or $assets.Count -ne 1 -or
-                      $assets[0].name -cne $pin.name -or $assets[0].digest -cne ('sha256:' + $pin.sha256) -or $assets[0].size -ne $pin.size) {
-                      throw 'The exact reviewed QA engine carrier is required.'
-                  }
+                  @'
+                  import { readFileSync } from "node:fs";
+                  import { reviewedEngineCarrier } from "./acceptance/scripts/verify-cyberai-windows-update-135.mjs";
+                  import { pinnedEngineMetadata } from "./acceptance/scripts/native-fixture-hooks-135.mjs";
+                  const review=JSON.parse(readFileSync("acceptance/scripts/native-fixture-review-135.json","utf8"));
+                  const selected=await pinnedEngineMetadata(reviewedEngineCarrier(review),process.env.GH_TOKEN);
+                  console.log(JSON.stringify({transport:selected.provenance.transport,originalMetadataHttpStatus:selected.provenance.originalMetadataHttpStatus,carrierMetadataHttpStatus:selected.provenance.carrierMetadataHttpStatus??null}));
+                  '@ | node --input-type=module
+                  if ($LASTEXITCODE -ne 0) { throw "Exact engine original/carrier preflight failed." }
+                  node acceptance/scripts/engine-pinned-metadata-self-test-135.mjs
+                  if ($LASTEXITCODE -ne 0) { throw "Pinned engine transport selfchecks failed." }
             - name: Install existing hidden launcher and recording dependencies
               working-directory: upstream
               shell: pwsh

@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
 import { reviewedEngineCarrier, privateAclDiagnostic, ownedQaAclHomes, sanitizedEnvironment, environmentValue, hashFile, allowedRedirect } from "./verify-cyberai-windows-update-135.mjs";
+import { pinnedEngineMetadata } from "./native-fixture-hooks-135.mjs";
 
 const exec = promisify(execFile);
 const EXPECTED_SOURCE = "8d15d870213ac0ab8f891b2130c748fd27e42044";
@@ -83,14 +84,11 @@ async function main() {
         return Array.isArray(result) ? result : [result];
     };
     try {
-        const release = await fetch(`https://api.github.com/repos/${REPO}/releases/${carrier.releaseId}`, { headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json" }, redirect: "error", signal: AbortSignal.timeout(45000) });
-        report.carrierMetadataHttpStatus = release.status; assert(release.ok);
-        const metadata = await release.json(); assert(metadata.draft && metadata.tag_name === "v0.0.135");
-        const asset = metadata.assets.find(a => a.id === carrier.assetId); assert(asset?.name === carrier.name && asset.size === carrier.size && asset.digest === "sha256:" + carrier.sha256);
+        const selected=await pinnedEngineMetadata(carrier,token);report.engineTransport=selected.provenance;
         const archive = join(root, "engine.tar.gz"), engineDir = join(root, "engine"); await mkdir(engineDir);
-        let url = new URL(`https://api.github.com/repos/${REPO}/releases/assets/${carrier.assetId}`), downloaded = false;
+        let url = new URL(`https://api.github.com/repos/${selected.repository}/releases/assets/${selected.asset.id}`), downloaded = false;
         for (let i=0;i<5;i++) {
-            const r = await fetch(url, { headers: { Accept: "application/octet-stream", ...(url.hostname === "api.github.com" ? { Authorization: "Bearer " + token } : {}) }, redirect: "manual", signal: AbortSignal.timeout(300000) });
+            const r = await fetch(url, { headers: { Accept: "application/octet-stream", ...(url.hostname === "api.github.com" && selected.repository===REPO ? { Authorization: "Bearer " + token } : {}) }, redirect: "manual", signal: AbortSignal.timeout(300000) });
             if ([301,302,303,307,308].includes(r.status)) { url=allowedRedirect(r.headers.get("location")); continue; }
             assert(r.ok && r.body); let bytes=0;
             await pipeline(Readable.fromWeb(r.body),new Transform({transform(c,e,done){bytes+=c.length;done(bytes<=carrier.size?null:Error("Pinned archive size exceeded"),c);}}),createWriteStream(archive,{flags:"wx",mode:0o600}));

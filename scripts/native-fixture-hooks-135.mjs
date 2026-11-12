@@ -29,6 +29,40 @@ const sourcePins = {
 };
 const review = JSON.parse(readFileSync(new URL("./native-fixture-review-135.json", import.meta.url), "utf8"));
 
+export async function pinnedEngineMetadata(carrier, token, fetcher = fetch) {
+    assert(carrier.engineRepository === "CyberfiTechh/CyberFi-Engine" && carrier.engineReleaseId === 442894294 &&
+        carrier.engineSourceCommit === "62a29b5872534ba627412b7903fc8103fa629331");
+    assert(carrier.repository === repo && [443152400, 443218651].includes(carrier.releaseId));
+    assert(/^[a-f0-9]{64}$/u.test(carrier.sha256) && Number.isSafeInteger(carrier.size) && carrier.size > 0);
+    const canonicalName = carrier.name.replace(/^qa-only-native135-engine-/u, "happy-agent-");
+    assert(/^happy-agent-0[.]4[.]127-(?:win32-x64|darwin-x64|darwin-arm64)[.]tar[.]gz$/u.test(canonicalName));
+    const headers = { Accept: "application/vnd.github+json", ...(token ? { Authorization: "Bearer " + token } : {}) };
+    const original = await fetcher(`https://api.github.com/repos/${carrier.engineRepository}/releases/${carrier.engineReleaseId}`,
+        { headers: { Accept: "application/vnd.github+json" }, redirect: "error", signal: AbortSignal.timeout(45000) });
+    const findAsset = (release, identity, name) => {
+        const matches = release.assets.filter(asset => asset.id === identity);
+        assert(matches.length === 1 && matches[0].name === name && matches[0].size === carrier.size && matches[0].digest === "sha256:" + carrier.sha256,
+            "Exact original engine bytes and archive identity are required");
+        return matches[0];
+    };
+    if (original.status === 200) {
+        const release = await original.json();
+        assert(release.id === carrier.engineReleaseId && release.tag_name === "v0.4.127" &&
+            release.target_commitish === carrier.engineSourceCommit && release.prerelease === false, "Exact original engine version/source is required");
+        return { repository: carrier.engineRepository, asset: findAsset(release, carrier.engineAssetId, canonicalName),
+            provenance: { ...carrier, transport: "canonical-original", originalMetadataHttpStatus: 200 } };
+    }
+    assert([403, 404].includes(original.status), `Original pinned engine metadata failed (HTTP ${original.status}); no carrier fallback allowed`);
+    const response = await fetcher(`https://api.github.com/repos/${repo}/releases/${carrier.releaseId}`,
+        { headers, redirect: "error", signal: AbortSignal.timeout(45000) });
+    assert(response.status === 200, `Own pinned engine carrier unavailable (HTTP ${response.status})`);
+    const release = await response.json(), tag = canonicalName.includes("darwin-") ? "macos-v0.0.135" : "v0.0.135";
+    assert(release.id === carrier.releaseId && release.tag_name === tag && release.draft === true && release.prerelease === true &&
+        release.body.includes("https://github.com/CyberfiTechh/CyberFi/commit/" + review.sourceCommit), "Carrier must stay on the exact reviewed own private draft");
+    return { repository: repo, asset: findAsset(release, carrier.assetId, carrier.name),
+        provenance: { ...carrier, transport: "owned-private-qa-carrier", originalMetadataHttpStatus: original.status, carrierMetadataHttpStatus: response.status } };
+}
+
 export function reviewedDraftPins(platform) {
     assert(Object.hasOwn(sourcePins, platform), "Unexpected native target");
     const ref = process.env.ACCEPTANCE_FIXTURE_REF, sourceCommit = process.env.ACCEPTANCE_SOURCE_SHA;
