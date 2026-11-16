@@ -1,0 +1,64 @@
+{
+  "version": "0.0.141",
+  "sourceCommit": "12d61923a45ac80fc0defd8d26b51fbccf64f575",
+  "referenceLimit": 16,
+  "packages": [
+    {
+      "filename": "CyberFi-0.0.141-x64.exe",
+      "size": 314506144,
+      "sha256": "b659a41cd4d8e9d19c7a7ecdadaa8b9b62e6b41aa98fc7e888dc514b590a36dc",
+      "releaseId": 447148753,
+      "assetId": 755178257
+    },
+    {
+      "filename": "CyberFi-0.0.141-x64.dmg",
+      "size": 399394870,
+      "sha256": "b3f3850559666e0c7cdbf27881fa2ada74f5d249817945a7f773b6033acd7955",
+      "releaseId": 447146437,
+      "assetId": 755182767
+    },
+    {
+      "filename": "CyberFi-0.0.141-arm64.dmg",
+      "size": 483784752,
+      "sha256": "a4df51694536f521ba88c770a46f5cc7f9b4269359610d061cba06663978ead4",
+      "releaseId": 447146437,
+      "assetId": 755191747
+    }
+  ],
+  "verification": {
+    "nativeWindowsLoginAndVersion141": true,
+    "nativeMacIntelArmLoginAndVersion141": true,
+    "referenceCountsAccepted": [
+      0,
+      5,
+      6,
+      7,
+      16
+    ],
+    "reference17Rejected": true,
+    "all16PathsForwardedInOrderOnce": true,
+    "referenceBytesPreserved": true,
+    "preloadCompiledOnlyTwoLimitChanges": true,
+    "macRun": "https://github.com/CyberfiTechh/CyberFi-Releases/actions/runs/43885698068"
+  },
+  "limits": {
+    "realModelGenerationCovered": false,
+    "automaticUpdateRetested": false,
+    "fullGeneralUiStressSuiteRepeated": false,
+    "osTrustedSigningCertified": false
+  },
+  "nativeMacProofs": [
+    {
+      "arch": "x64",
+      "jobId": 133363115314,
+      "artifactId": 14233659268,
+      "artifactDigest": "sha256:3da623ed6985cd92a89d25654cb5fbe325ea46b2001220301ce36b7ea6179bf5"
+    },
+    {
+      "arch": "arm64",
+      "jobId": 133363114778,
+      "artifactId": 14234997239,
+      "artifactDigest": "sha256:1e08217aaaf870108a967160518c5ea248c9a16ac3c6faf8eab7b54c0b2af4e5"
+    }
+  ]
+}
