@@ -1,0 +1,43 @@
+{
+  "version": "0.0.140",
+  "sourceCommit": "83c8c27a4c8f88c375632739303a31bc2ab022fb",
+  "correction": "renderer version label and provider-aware Gallery edit canvas",
+  "publicPackages": [
+    {
+      "filename": "CyberFi-0.0.140-x64.exe",
+      "canonicalPublicManifestVerified": true,
+      "bytes": 314505632,
+      "sha256": "d8cd326f10b9e5596375226e204a04b7401c2f256757c28bc7edb3f3c949024a"
+    },
+    {
+      "filename": "CyberFi-0.0.140-arm64.dmg",
+      "canonicalPublicManifestVerified": true,
+      "bytes": 483956896,
+      "sha256": "ff1acd1b287030ce6b87df3c5e03f6bb9bd921bb8b38bff659991db9f7148348"
+    },
+    {
+      "filename": "CyberFi-0.0.140-x64.dmg",
+      "canonicalPublicManifestVerified": true,
+      "bytes": 398958511,
+      "sha256": "f66dd8f61f5196fdf03bc08a7d56c51e9e2264c493572dfa39397a7afc62bcdd"
+    }
+  ],
+  "nativeWindowsLoginAndRenderer140": true,
+  "nativeMacIntelArmLoginAndRenderer140": true,
+  "studioActualDaemonDeletedProjectRecovery": true,
+  "imageUiRegression": true,
+  "focusedImageQueueTests": 11,
+  "outsidePixelsPreserved": 1178672,
+  "promotionRun": "https://github.com/CyberfiTechh/CyberFi-Releases/actions/runs/43869133756",
+  "backups": [
+    447027755,
+    447027915
+  ],
+  "limits": {
+    "references16Included": false,
+    "realModelGenerationCovered": false,
+    "real139To140AutoUpdatePassed": false,
+    "windowsAutoUpdateBlockedByCopiedAccount": true,
+    "osTrustedSigningCertified": false
+  }
+}
