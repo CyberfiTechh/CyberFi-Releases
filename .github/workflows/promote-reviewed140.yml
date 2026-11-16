@@ -1,0 +1,37 @@
+name: Promote reviewed same-version CyberFi 140 correction
+run-name: Correct existing Windows and Mac 140 assets from reviewed plan ${{ inputs.plan_asset_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      plan_asset_id: {type: string, required: true}
+      plan_sha256: {type: string, required: true}
+permissions:
+  contents: read
+concurrency:
+  group: cyberfi-stable-140-correction
+  cancel-in-progress: false
+jobs:
+  replace:
+    if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Back up every original byte and replace only the two existing 140 releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_ASSET_ID: ${{ inputs.plan_asset_id }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+        run: python3 scripts/promote-reviewed140.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: CyberFi-140-correction-promotion-report
+          path: ${{ runner.temp }}/promotion-report.json
+          retention-days: 1
+          include-hidden-files: false
