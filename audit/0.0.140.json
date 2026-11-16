@@ -1,0 +1,73 @@
+{
+  "version": "0.0.140",
+  "sourceCommit": "e8c34954ebcbfe093da57fb2048175c4fd6ed6f5",
+  "changes": [
+    "Studio validates cached project and agent before reuse.",
+    "A confirmed deleted Studio project is registered again in its existing directory; a replacement conversation is opened in the same mounted panel.",
+    "Concurrent recovery is shared; authorization, server and timeout errors do not recreate projects.",
+    "Accepted image generation requests are never automatically resubmitted."
+  ],
+  "verification": {
+    "targetedTestsPassed": 15,
+    "typecheckPassed": true,
+    "rendererBuildPassed": true,
+    "windowsRendererFilesVerified": 550,
+    "windowsSignedPeFilesVerified": 50,
+    "windowsNativeHiddenLoginPassed": true,
+    "macIntelNativeHiddenLoginPassed": true,
+    "macArmNativeHiddenLoginPassed": true,
+    "macPackagingRun": "https://github.com/CyberfiTechh/CyberFi-Releases/actions/runs/43850251525",
+    "sharedPreloadMatchesFreshSource": true
+  },
+  "limits": {
+    "fullGeneralUiStressAndGymRepeated": false,
+    "liveStudioAccountGenerationTested": false,
+    "installed139To140UpdateRetested": false,
+    "osTrustedSigningCertified": false,
+    "macLocallyRedownloaded": false
+  },
+  "packages": [
+    {
+      "name": "CyberFi-0.0.140-x64.exe",
+      "size": 314504472,
+      "sha256": "5eabb7268e9393fb67d2ab7c1f4d8ec6a9f590632f7b9583b211c448a0a90397",
+      "assetId": 754506009,
+      "releaseId": 446902538,
+      "tag": "windows-v0.0.140"
+    },
+    {
+      "name": "CyberFi-0.0.140-x64.dmg",
+      "size": 399389448,
+      "sha256": "226a87e2ff88757d307d68df5eb44503d9f59a7f2a3bb4dd46bb9417a5e41bb5",
+      "assetId": 754450716,
+      "releaseId": 446881539,
+      "tag": "mac-v0.0.140"
+    },
+    {
+      "name": "CyberFi-0.0.140-arm64.dmg",
+      "size": 483856836,
+      "sha256": "f676a60f5cabe0772918b2cac722e08869c2a4f30f5720b06504ebbdc7bf02a3",
+      "assetId": 754481295,
+      "releaseId": 446881539,
+      "tag": "mac-v0.0.140"
+    }
+  ],
+  "macEvidence": [
+    {
+      "arch": "x64",
+      "jobId": 133240633819,
+      "artifactId": 14216932920,
+      "artifactDigest": "sha256:669c1655fe76cdf7b8cfbabd2641f097eda5fba35852611c8e89a144f18529ea",
+      "protectedAsarEntries": 2804,
+      "protectedBundleEntries": 18555
+    },
+    {
+      "arch": "arm64",
+      "jobId": 133240634181,
+      "artifactId": 14219440177,
+      "artifactDigest": "sha256:e46d7b1b504ef3fec6395629a46f8ad0ce4943a5afec4cb129a57abcb2191eda",
+      "protectedAsarEntries": 2804,
+      "protectedBundleEntries": 23167
+    }
+  ]
+}
