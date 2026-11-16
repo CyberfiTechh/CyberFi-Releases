@@ -1,0 +1,91 @@
+{
+  "version": "0.0.139",
+  "sourceCommit": "9c6669d06eab5dbfb867149ecc91ac0d8411b0dd",
+  "bridgeWindowsSource": "1a3a275f38da310472e6e7949f4337cd71c7bff1",
+  "native": {
+    "windows136To138To139AndReopen": true,
+    "macIntel136To138To139AndReopen": true,
+    "macIntelRollback": true,
+    "macArm138To139AndReopen": true,
+    "macArmOld136FirstHopTested": false,
+    "publicFeedEndToEndTested": false,
+    "armRun": "https://github.com/CyberfiTechh/CyberFi-Releases/actions/runs/43819068714"
+  },
+  "generalUi": {
+    "chromiumPassed": 950,
+    "firefoxPassed": 902,
+    "firefoxSkipped": 33,
+    "webKitShardsPassed": 5,
+    "webKitShardsTotal": 16,
+    "fullSuitePassed": false,
+    "remainingSkippedByUser": true,
+    "earlierWebKitRun": "Browser disconnected at the 4 GiB test-job limit; bounded shards were used instead.",
+    "remainingStressAndGym": "not run at user request"
+  },
+  "signing": {
+    "updateRsaAndShaVerified": true,
+    "osTrustedSigningCertified": false
+  },
+  "proofDigests": {
+    "native-chain-acceptance.json": "ff3b7801fd9871eb3139e603e37d16b3460e2aa76d7b197b12428f25d39c512a",
+    "native-chain-rollback.json": "9ab6076759d587126193e635d805ab72e5c2083c4a327e1a27b64ef70aa6ba81",
+    "arm-native-acceptance.json": "eeb6973f7254f4add4eebb0bd6e5f15b9e40fb7e743c23515a18dcfc5656f458",
+    "windows-native-chain-current.json": "1ae6f027f97b3e18aac02fa66d50f72c51e2a1224c1e0d90cb4e2856c3150c50"
+  },
+  "packages": [
+    {
+      "version": "0.0.138",
+      "platform": "windows",
+      "arch": "x64",
+      "tag": "v0.0.138",
+      "bytes": 142790368,
+      "sha256": "a7d5a9ec4394f065e12dd18f1dfa2ce239f1aa7cc0c5eb0d484b87f01457b4d6",
+      "sourceSha": "1a3a275f38da310472e6e7949f4337cd71c7bff1"
+    },
+    {
+      "version": "0.0.138",
+      "platform": "macos",
+      "arch": "x64",
+      "tag": "macos-v0.0.138",
+      "bytes": 1869660,
+      "sha256": "5c7a704aa1056701590b3e8f7b5e16cb3230c51f8285de5ef642a93dd7fb4c58",
+      "sourceSha": "9c6669d06eab5dbfb867149ecc91ac0d8411b0dd"
+    },
+    {
+      "version": "0.0.138",
+      "platform": "macos",
+      "arch": "arm64",
+      "tag": "macos-v0.0.138",
+      "bytes": 1858638,
+      "sha256": "eb12f8fd35119fe3dd59b754afdab25e16af78c81791035d278697a4d7ffe98d",
+      "sourceSha": "9c6669d06eab5dbfb867149ecc91ac0d8411b0dd"
+    },
+    {
+      "version": "0.0.139",
+      "platform": "windows",
+      "arch": "x64",
+      "tag": "windows-v0.0.139",
+      "bytes": 314505560,
+      "sha256": "f8d984d50ae7c3f5a97edf4b69364edf1e70dcb8f89af5d5e4314a6a7f6dbcd4",
+      "sourceSha": "9c6669d06eab5dbfb867149ecc91ac0d8411b0dd"
+    },
+    {
+      "version": "0.0.139",
+      "platform": "macos",
+      "arch": "x64",
+      "tag": "mac-v0.0.139",
+      "bytes": 355325406,
+      "sha256": "faf55d88d1a040282066899e2c6ff2e9be0d4b7f95873161b0d6adddc7b68984",
+      "sourceSha": "9c6669d06eab5dbfb867149ecc91ac0d8411b0dd"
+    },
+    {
+      "version": "0.0.139",
+      "platform": "macos",
+      "arch": "arm64",
+      "tag": "mac-v0.0.139",
+      "bytes": 426676692,
+      "sha256": "f6185bb2a14b26c17b910e6279aa417416492a7eb3c241d26fd70cfd913b38d4",
+      "sourceSha": "9c6669d06eab5dbfb867149ecc91ac0d8411b0dd"
+    }
+  ]
+}

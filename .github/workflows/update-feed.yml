@@ -34,7 +34,7 @@ jobs:
                   pages = json.loads((pathlib.Path(os.environ["RUNNER_TEMP"]) / "releases.json").read_text())
                   releases = [release for page in pages for release in page
                       if release.get("draft") is False and release.get("published_at")
-                      and re.fullmatch(r"(?:macos-)?v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", release.get("tag_name", ""))]
+                      and re.fullmatch(r"(?:(?:macos|mac|windows)-)?v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", release.get("tag_name", ""))]
                   releases.sort(key=lambda release: (release["published_at"], release["id"]), reverse=True)
                   index = [{"tag_name": release["tag_name"], "draft": False, "assets": [
                       {"id": asset["id"], "name": asset["name"], "state": "uploaded"} for asset in release.get("assets", [])
