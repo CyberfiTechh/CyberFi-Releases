@@ -83,10 +83,10 @@ export async function repackArchive(original,target,renderer,manifest) {
 }
 
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
- assert.equal(process.platform,'darwin');const [app,renderer,manifestPath,arch,output]=process.argv.slice(2);assert(['x64','arm64'].includes(arch));assert.equal(process.arch,arch);
+ assert.equal(process.platform,'darwin');const [app,renderer,manifestPath,arch,output]=process.argv.slice(2);assert(['x64','arm64'].includes(arch));assert.equal(process.arch,arch);const machoArch=arch==='x64'?'x86_64':arch;
  for(const p of [app,renderer,manifestPath,output])assert(p&&p.startsWith(process.env.RUNNER_TEMP+'/'));
  const run=(file,args,options={})=>execFileSync(file,args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],...options});
- run('/usr/bin/codesign',['--verify','--deep','--strict',app]);run('/usr/bin/lipo',[join(app,'Contents/MacOS/CyberFi'),'-verify_arch',arch]);
+ run('/usr/bin/codesign',['--verify','--deep','--strict',app]);run('/usr/bin/lipo',[join(app,'Contents/MacOS/CyberFi'),'-verify_arch',machoArch]);
  const native=join(app,'Contents/MacOS/CyberFi');const beforeUnsigned=join(process.env.RUNNER_TEMP,'native-before-'+arch);await copyFile(native,beforeUnsigned);
  run('/usr/bin/codesign',['--remove-signature',beforeUnsigned]);const nativeBefore=sha(readFileSync(beforeUnsigned));
  const protectedBundle=bundleInventory(app);
@@ -113,7 +113,7 @@ print(json.dumps({'bundleId':v['CFBundleIdentifier'],'version':v['CFBundleShortV
  run('/usr/bin/codesign',['--verify','--deep','--strict',app]);assert.equal(run('/usr/bin/codesign',['-d','--entitlements',':-',app]),entitlementBefore);
  const afterUnsigned=join(process.env.RUNNER_TEMP,'native-after-'+arch);await copyFile(native,afterUnsigned);run('/usr/bin/codesign',['--remove-signature',afterUnsigned]);assert.equal(sha(readFileSync(afterUnsigned)),nativeBefore);
  assert.deepEqual(bundleInventory(app),protectedBundle);
- run('/usr/bin/lipo',[join(app,'Contents/MacOS/CyberFi'),'-verify_arch',arch]);
+ run('/usr/bin/lipo',[join(app,'Contents/MacOS/CyberFi'),'-verify_arch',machoArch]);
  assert.equal(plistResult.asarIntegrity['Resources/app.asar'].hash,sha(asar.getRawHeader(archive).headerString));
  assert.deepEqual(readdirSync(dirname(app)),['CyberFi.app']);
  await mkdir(dirname(output),{recursive:true});run('/usr/bin/hdiutil',['create','-fs','HFS+','-format','UDZO','-volname','CyberFi 0.0.140','-srcfolder',dirname(app),output]);run('/usr/bin/hdiutil',['verify',output]);
