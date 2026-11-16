@@ -1,5 +1,62 @@
 [
   {
+    "tag_name": "mac-v0.0.140",
+    "draft": false,
+    "assets": [
+      {
+        "id": 754481295,
+        "name": "CyberFi-0.0.140-arm64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 754497802,
+        "name": "CyberFi-0.0.140-arm64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 754497859,
+        "name": "CyberFi-0.0.140-arm64.dmg.update.json",
+        "state": "uploaded"
+      },
+      {
+        "id": 754450716,
+        "name": "CyberFi-0.0.140-x64.dmg",
+        "state": "uploaded"
+      },
+      {
+        "id": 754484307,
+        "name": "CyberFi-0.0.140-x64.dmg.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 754484424,
+        "name": "CyberFi-0.0.140-x64.dmg.update.json",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
+    "tag_name": "windows-v0.0.140",
+    "draft": false,
+    "assets": [
+      {
+        "id": 754506009,
+        "name": "CyberFi-0.0.140-x64.exe",
+        "state": "uploaded"
+      },
+      {
+        "id": 754514268,
+        "name": "CyberFi-0.0.140-x64.exe.sha256",
+        "state": "uploaded"
+      },
+      {
+        "id": 754514310,
+        "name": "CyberFi-0.0.140-x64.exe.update.json",
+        "state": "uploaded"
+      }
+    ]
+  },
+  {
     "tag_name": "macos-v0.0.138",
     "draft": false,
     "assets": [
