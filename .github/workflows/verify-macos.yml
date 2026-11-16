@@ -1,4 +1,4 @@
-name: Verify unpublished CyberFi 139 ARM candidate
+name: Verify unpublished CyberFi 138 bridge and139 ARM candidate
 run-name: CyberFi 139 ARM candidate asset ${{ inputs.asset_id }}
 on:
   workflow_dispatch:
@@ -11,6 +11,12 @@ on:
         type: string
         required: true
       asset_id:
+        type: string
+        required: true
+      bridge_asset_id:
+        type: string
+        required: true
+      bridge_sha256:
         type: string
         required: true
       sha256:
@@ -53,13 +59,15 @@ jobs:
           RELEASE_ID: ${{ inputs.release_id }}
           ASSET_ID: ${{ inputs.asset_id }}
           EXPECTED_SHA: ${{ inputs.sha256 }}
+          BRIDGE_ASSET_ID: ${{ inputs.bridge_asset_id }}
+          BRIDGE_SHA: ${{ inputs.bridge_sha256 }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
           [[ "$RELEASE_ID" =~ ^[0-9]+$ && "$ASSET_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]
           gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" > "$RUNNER_TEMP/release.json"
-          jq -e --argjson id "$ASSET_ID" --arg digest "sha256:$EXPECTED_SHA" '.draft == true and .tag_name == "macos-v0.0.139-preview.1" and any(.assets[]; .id == $id and .digest == $digest and .name == "CyberFi-0.0.139-preview.1-arm64.dmg")' "$RUNNER_TEMP/release.json" > /dev/null
+          jq -e --argjson id "$ASSET_ID" --arg digest "sha256:$EXPECTED_SHA" '.draft == true and .tag_name == "mac-v0.0.139" and any(.assets[]; .id == $id and .digest == $digest and .name == "CyberFi-0.0.139-arm64.dmg")' "$RUNNER_TEMP/release.json" > /dev/null
           gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$ASSET_ID" > "$RUNNER_TEMP/candidate.dmg"
           printf '%s  %s\n' "$EXPECTED_SHA" "$RUNNER_TEMP/candidate.dmg" | shasum -a 256 -c -
           hdiutil verify "$RUNNER_TEMP/candidate.dmg"
@@ -68,8 +76,21 @@ jobs:
           app="$RUNNER_TEMP/CyberFi-DMG/CyberFi.app"
           lipo "$app/Contents/MacOS/CyberFi" -verify_arch arm64
           codesign --verify --deep --strict "$app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.0.139-preview.1
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.0.139
           echo "CYBERFI_TEST_APP=$app/Contents/MacOS/CyberFi" >> "$GITHUB_ENV"
+          [[ "$BRIDGE_ASSET_ID" =~ ^[0-9]+$ && "$BRIDGE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$BRIDGE_ASSET_ID" > "$RUNNER_TEMP/bridge.dmg"
+          printf '%s  %s\n' "$BRIDGE_SHA" "$RUNNER_TEMP/bridge.dmg" | shasum -a 256 -c -
+          hdiutil verify "$RUNNER_TEMP/bridge.dmg"
+          mkdir "$RUNNER_TEMP/Bridge-DMG"
+          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/Bridge-DMG" "$RUNNER_TEMP/bridge.dmg"
+          bridge="$RUNNER_TEMP/Bridge-DMG/CyberFi.app"
+          lipo "$bridge/Contents/MacOS/CyberFi" -verify_arch arm64
+          codesign --verify --deep --strict "$bridge"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$bridge/Contents/Info.plist")" = 0.0.138
+          echo "CYBERFI_TEST_BRIDGE_APP=$bridge" >> "$GITHUB_ENV"
+          echo "CYBERFI_TARGET_DMG=$RUNNER_TEMP/candidate.dmg" >> "$GITHUB_ENV"
+
       - name: Run real hidden ARM app and record login and access boundary
         working-directory: upstream
         run: |
@@ -79,9 +100,15 @@ jobs:
         if: always()
         with:
           name: CyberFi-139-ARM-${{ inputs.asset_id }}
-          path: ${{ runner.temp }}/cyberfi-arm139
+          path: |
+            ${{ runner.temp }}/cyberfi-arm139/report.json
+            ${{ runner.temp }}/cyberfi-arm139/checkpoint.json
+            ${{ runner.temp }}/cyberfi-arm139/login.png
+            ${{ runner.temp }}/cyberfi-arm139/login.webm
           retention-days: 1
           include-hidden-files: false
       - name: Detach the owned image
         if: always()
-        run: hdiutil detach "$RUNNER_TEMP/CyberFi-DMG" || true
+        run: |
+          hdiutil detach "$RUNNER_TEMP/Bridge-DMG" || true
+          hdiutil detach "$RUNNER_TEMP/CyberFi-DMG" || true

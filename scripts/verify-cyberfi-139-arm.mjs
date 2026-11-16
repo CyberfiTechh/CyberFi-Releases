@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {mkdir,writeFile,readFile,readdir,copyFile,chmod} from 'node:fs/promises';
 import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
 import {createServer} from 'node:net';
@@ -12,12 +13,16 @@ const {chromium}=createRequire(join(upstream,'packages/happy-desktop-gym/package
 const root=join(process.env.RUNNER_TEMP,'cyberfi-arm139');await mkdir(root,{mode:0o700});
 for(const n of ['profile','home','tmp'])await mkdir(join(root,n));
 const server=createServer();await new Promise(ok=>server.listen(0,'127.0.0.1',ok));const port=server.address().port;await new Promise(ok=>server.close(ok));
-const report={success:false,platform:process.platform,arch:process.arch,realAccountLoginCovered:false,automaticUpdateCovered:false,rendererErrors:[]};
+const report={success:false,platform:process.platform,arch:process.arch,realAccountLoginCovered:false,automaticUpdateCovered:true,old136FirstHopCovered:false,signed139CacheUsed:true,rendererErrors:[]};
 const env={PATH:process.env.PATH,HOME:join(root,'home'),USERPROFILE:join(root,'home'),TMPDIR:join(root,'tmp'),HAPPY_HOME_DIR:join(root,'home/.happy'),HAPPY_DESKTOP_DEBUG:'1',HAPPY_DEBUG_RENDERER_PORT:String(port)};
+await mkdir(join(root,'installed'));const app=join(root,'installed/CyberFi.app');
+execFileSync('/usr/bin/ditto',[process.env.CYBERFI_TEST_BRIDGE_APP,app]);
+const cache=join(root,'profile/desktop/bridge-update/cache');await mkdir(cache,{recursive:true,mode:0o700});
+await copyFile(process.env.CYBERFI_TARGET_DMG,join(cache,'CyberFi-0.0.139-arm64.dmg'));await chmod(join(cache,'CyberFi-0.0.139-arm64.dmg'),0o600);
 let outcome,failure,browser,video;
-const run=gymElectronProcessRun({executablePath:process.env.CYBERFI_TEST_APP,args:['--user-data-dir='+join(root,'profile'),'--debug'],env,timeout:150000}).then(x=>outcome=x,e=>failure=e);
+const run=gymElectronProcessRun({executablePath:join(app,"Contents/MacOS/CyberFi"),args:['--user-data-dir='+join(root,'profile'),'--debug'],env,timeout:300000}).then(x=>outcome=x,e=>failure=e);
 try{
- for(let i=0;i<100;i++){if(outcome||failure)throw failure??Error('App exited before readiness');try{browser=await chromium.connectOverCDP('http://127.0.0.1:'+port,{timeout:500});break;}catch{await delay(500);}}
+ for(let i=0;i<360;i++){if(failure)throw failure;if(outcome&&outcome.exitCode!==0)throw Error('Bridge exited unsuccessfully');try{browser=await chromium.connectOverCDP('http://127.0.0.1:'+port,{timeout:500});break;}catch{await delay(500);}}
  assert(browser,'Native ARM renderer unavailable');let p;
  for(let i=0;i<60&&!p;i++){p=browser.contexts().flatMap(c=>c.pages()).find(p=>!p.url().startsWith('devtools:'));if(!p)await delay(250);}
  assert(p);p.on('pageerror',e=>report.rendererErrors.push(e.message));
@@ -28,8 +33,12 @@ try{
  assert.equal(await p.locator('input[name=username]').inputValue(),'');assert.equal(await p.locator('input[name=password]').inputValue(),'');
  assert.equal(await p.title(),'CyberFi');await p.screenshot({path:join(root,'login.png')});await delay(2500);
  report.video=await video.stop();video=undefined;assert(report.video.framesWritten>0);assert.equal(report.rendererErrors.length,0);
+ const commitDeadline=Date.now()+90000;let committed=false;
+ while(Date.now()<commitDeadline){const stages=(await readdir(join(root,'installed'))).filter(n=>n.startsWith('.cyberfi-update-'));for(const stage of stages){try{const result=JSON.parse(await readFile(join(root,'installed',stage,'result.json'),'utf8'));const receipt=JSON.parse(await readFile(join(root,'installed',stage,'receipt.json'),'utf8'));const cleanup=JSON.parse(await readFile(join(root,'installed',stage,'bridge-cleanup.json'),'utf8'));assert.equal(result.version,'0.0.139');assert.equal(result.status,'acknowledged');assert.equal(result.nonce,receipt.nonce);assert.equal(result.pid,receipt.pid);assert.equal(cleanup.nonce,result.nonce);assert.equal(cleanup.verifiedCacheRemoved,true);report.nativeCommit=result;committed=true;}catch{}}if(committed)break;await delay(300);}
+ assert(committed,'Native139 installation was not acknowledged');
+ assert.equal(execFileSync('/usr/libexec/PlistBuddy',['-c','Print CFBundleShortVersionString',join(app,'Contents/Info.plist')],{encoding:'utf8'}).trim(),'0.0.139');
  const session=await browser.newBrowserCDPSession();await Promise.race([session.send('Browser.close').catch(()=>undefined),delay(3000)]);
- await run;assert.equal(outcome?.exitCode,0);report.nativeExitCode=outcome.exitCode;report.success=true;
+ await run;assert.equal(outcome?.exitCode,0);report.bridgeExitCode=outcome.exitCode;report.success=true;
 }catch(e){report.failure=e.message;process.exitCode=1;}
 finally{
  await writeFile(join(root,'checkpoint.json'),JSON.stringify(report,null,2));
