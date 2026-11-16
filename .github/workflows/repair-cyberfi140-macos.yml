@@ -1,0 +1,140 @@
+name: Repair reviewed CyberFi 140 Mac version identity
+run-name: Corrected CyberFi 140 Mac packages for private draft ${{ inputs.release_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      release_id: {type: string, required: true}
+      renderer_asset_id: {type: string, required: true}
+      manifest_asset_id: {type: string, required: true}
+      renderer_sha256: {type: string, required: true}
+      manifest_sha256: {type: string, required: true}
+      studio_asset_id: {type: string, required: true}
+      studio_manifest_asset_id: {type: string, required: true}
+      studio_sha256: {type: string, required: true}
+      studio_manifest_sha256: {type: string, required: true}
+permissions:
+  contents: read
+jobs:
+  package:
+    if: github.repository == 'CyberfiTechh/CyberFi-Releases' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15-intel, arch: x64, baseline_sha: faf55d88d1a040282066899e2c6ff2e9be0d4b7f95873161b0d6adddc7b68984}
+          - {runner: macos-15, arch: arm64, baseline_sha: f6185bb2a14b26c17b910e6279aa417416492a7eb3c241d26fd70cfd913b38d4}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify exact draft and reviewed renderer inputs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          RENDERER_ID: ${{ inputs.renderer_asset_id }}
+          MANIFEST_ID: ${{ inputs.manifest_asset_id }}
+          RENDERER_SHA: ${{ inputs.renderer_sha256 }}
+          MANIFEST_SHA: ${{ inputs.manifest_sha256 }}
+          STUDIO_ID: ${{ inputs.studio_asset_id }}
+          STUDIO_MANIFEST_ID: ${{ inputs.studio_manifest_asset_id }}
+          STUDIO_SHA: ${{ inputs.studio_sha256 }}
+          STUDIO_MANIFEST_SHA: ${{ inputs.studio_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ && "$RENDERER_ID" =~ ^[1-9][0-9]*$ && "$MANIFEST_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RENDERER_SHA" = 50e10866529404621eac0249b70c4ea243bcaf4c7caf8c1f7dd890450883c76a && "$MANIFEST_SHA" =~ ^[a-f0-9]{64}$ ]]
+          gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" > "$RUNNER_TEMP/draft.json"
+          jq -e --argjson r "$RENDERER_ID" --argjson m "$MANIFEST_ID" --arg rd "sha256:$RENDERER_SHA" --arg md "sha256:$MANIFEST_SHA" '.draft == true and .tag_name == "qa-mac140-versionfix-20261116" and any(.assets[];.id==$r and .name=="CyberFi-0.0.140-renderer.zip" and .digest==$rd and .size<=134217728) and any(.assets[];.id==$m and .name=="CyberFi-0.0.140-renderer.manifest.json" and .digest==$md and .size<=1048576)' "$RUNNER_TEMP/draft.json" > /dev/null
+          gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$RENDERER_ID" > "$RUNNER_TEMP/renderer.zip"
+          gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$MANIFEST_ID" > "$RUNNER_TEMP/renderer-manifest.json"
+          printf '%s  %s\n' "$RENDERER_SHA" "$RUNNER_TEMP/renderer.zip" "$MANIFEST_SHA" "$RUNNER_TEMP/renderer-manifest.json" | shasum -a 256 -c -
+          [[ "$STUDIO_ID" =~ ^[1-9][0-9]*$ && "$STUDIO_MANIFEST_ID" =~ ^[1-9][0-9]*$ && "$STUDIO_MANIFEST_SHA" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$STUDIO_SHA" = 6a49f64e28ee9f43ad2a4520be9f5900abaefd7d5eaa5b778d08f3d74074d4c7 ]]
+          jq -e --argjson s "$STUDIO_ID" --argjson m "$STUDIO_MANIFEST_ID" --arg sd "sha256:$STUDIO_SHA" --arg md "sha256:$STUDIO_MANIFEST_SHA" 'any(.assets[];.id==$s and .name=="CyberFi-0.0.140-studio-overlay.zip" and .digest==$sd and .size<=134217728) and any(.assets[];.id==$m and .name=="CyberFi-0.0.140-studio-overlay.manifest.json" and .digest==$md and .size<=1048576)' "$RUNNER_TEMP/draft.json" > /dev/null
+          gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$STUDIO_ID" > "$RUNNER_TEMP/studio-overlay.zip"
+          gh api -H 'Accept: application/octet-stream' "repos/CyberfiTechh/CyberFi-Releases/releases/assets/$STUDIO_MANIFEST_ID" > "$RUNNER_TEMP/studio-overlay-manifest.json"
+          printf '%s  %s\n' "$STUDIO_SHA" "$RUNNER_TEMP/studio-overlay.zip" "$STUDIO_MANIFEST_SHA" "$RUNNER_TEMP/studio-overlay-manifest.json" | shasum -a 256 -c -
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,stat,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          for bundle,sha_var in [('renderer','RENDERER_SHA'),('studio-overlay','STUDIO_SHA')]:
+              manifest=json.loads((root/(bundle+'-manifest.json')).read_text())
+              assert manifest['sourceCommit']=='83c8c27a4c8f88c375632739303a31bc2ab022fb'
+              assert manifest['zipSha256']==os.environ[sha_var]
+              if bundle=='renderer':assert manifest['releaseVersion']=='0.0.140'
+              dest=root/bundle;dest.mkdir()
+              with zipfile.ZipFile(root/(bundle+'.zip')) as z:
+                  entries=z.infolist();assert len(entries)<=10000 and sum(i.file_size for i in entries)<=200*1024**2
+                  names=[i.filename for i in entries if not i.is_dir()];assert len(names)==len(set(names)) and set(names)==set(manifest['files'])
+                  for i in entries:
+                      p=pathlib.PurePosixPath(i.filename);assert not p.is_absolute() and '..' not in p.parts and '\\' not in i.filename and not stat.S_ISLNK(i.external_attr>>16)
+                      if i.is_dir():continue
+                      if bundle=='studio-overlay':assert i.filename=='server.mjs' or i.filename.startswith('web/')
+                      data=z.read(i);assert hashlib.sha256(data).hexdigest()==manifest['files'][i.filename]
+                      target=dest.joinpath(*p.parts);target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+          PY
+      - name: Prepare pinned packaging and hidden-launch tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/tools" --ignore-scripts --no-audit --no-fund @electron/asar@3.4.1 playwright@1.61.1
+          curl --fail --location --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/slopus/happy-desktop/c9feffb54cdb3591220dafced4070e118e3d297a/packages/happy-desktop-gym/sources/electron/launch.ts' > "$RUNNER_TEMP/tools/gym-launch.ts"
+          printf '%s  %s\n' 327e4449031f44d4874fab27d922b04feabd0dc7518a5f88e4b4276e325c4c62 "$RUNNER_TEMP/tools/gym-launch.ts" | shasum -a 256 -c -
+          node "$RUNNER_TEMP/tools/node_modules/playwright/cli.js" install ffmpeg
+      - name: Repack only the renderer in the immutable 139 baseline
+        shell: bash
+        env:
+          BASELINE_SHA: ${{ matrix.baseline_sha }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --proto '=https' --tlsv1.2 "https://github.com/CyberfiTechh/CyberFi-Releases/releases/download/mac-v0.0.139/CyberFi-0.0.139-$TARGET_ARCH.dmg" > "$RUNNER_TEMP/baseline.dmg"
+          printf '%s  %s\n' "$BASELINE_SHA" "$RUNNER_TEMP/baseline.dmg" | shasum -a 256 -c -
+          hdiutil verify "$RUNNER_TEMP/baseline.dmg"
+          mkdir "$RUNNER_TEMP/baseline-mount" "$RUNNER_TEMP/app-stage"
+          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/baseline-mount" "$RUNNER_TEMP/baseline.dmg"
+          ditto "$RUNNER_TEMP/baseline-mount/CyberFi.app" "$RUNNER_TEMP/app-stage/CyberFi.app"
+          hdiutil detach "$RUNNER_TEMP/baseline-mount"
+          export CYBERFI_ASAR_MODULE="$RUNNER_TEMP/tools/node_modules/@electron/asar/lib/asar.js"
+          node scripts/macos140-versionfix-repack.mjs "$RUNNER_TEMP/app-stage/CyberFi.app" "$RUNNER_TEMP/renderer" "$RUNNER_TEMP/renderer-manifest.json" "$TARGET_ARCH" "$RUNNER_TEMP/output/CyberFi-0.0.140-$TARGET_ARCH.dmg" "$RUNNER_TEMP/studio-overlay" "$RUNNER_TEMP/studio-overlay-manifest.json"
+      - name: Verify real hidden 140 startup and login boundary
+        shell: bash
+        env:
+          CYBERFI_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN
+          export CYBERFI_TEST_APP="$RUNNER_TEMP/app-stage/CyberFi.app/Contents/MacOS/CyberFi"
+          node scripts/macos140-versionfix-smoke.mjs "$RUNNER_TEMP/tools"
+      - name: Append verified packages to the private draft only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RELEASE_ID" | jq -e '.draft==true and .tag_name=="qa-mac140-versionfix-20261116"' > /dev/null
+          gh release upload qa-mac140-versionfix-20261116 "$RUNNER_TEMP/output/CyberFi-0.0.140-$TARGET_ARCH.dmg" "$RUNNER_TEMP/output/CyberFi-0.0.140-$TARGET_ARCH.dmg.report.json" --repo CyberfiTechh/CyberFi-Releases
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: CyberFi-140-Mac-${{ matrix.arch }}-verification
+          path: |
+            ${{ runner.temp }}/output/*.report.json
+            ${{ runner.temp }}/cyberfi-smoke-*/report.json
+            ${{ runner.temp }}/cyberfi-smoke-*/checkpoint.json
+            ${{ runner.temp }}/cyberfi-smoke-*/login.png
+            ${{ runner.temp }}/cyberfi-smoke-*/login.webm
+          retention-days: 1
+          include-hidden-files: false
