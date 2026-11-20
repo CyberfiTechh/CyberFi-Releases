@@ -41,7 +41,7 @@ jobs:
           test "$(uname -m)" = arm64
           [[ "$RID" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/CyberfiTechh/CyberFi-Releases/releases/$RID" > "$RUNNER_TEMP/release.json"
-          jq -e '.draft==true and .tag_name=="mac-v0.0.142"' "$RUNNER_TEMP/release.json" >/dev/null
+          jq -e '.draft==false and .prerelease==true and .tag_name=="mac-v0.0.142"' "$RUNNER_TEMP/release.json" >/dev/null
           for spec in "$PID:$PSHA:CyberFi-0.0.142-arm64.dmg:536870912" "$SID:$SSHA:CyberFi-0.0.142-arm64.dmg.update.json:4096" "$MID:$MSHA:CyberFi-0.0.142-arm64.acceptance.json:1048576"; do
             IFS=: read -r id digest name bound <<< "$spec"
             [[ "$id" =~ ^[1-9][0-9]*$ && "$digest" =~ ^[a-f0-9]{64}$ ]]
