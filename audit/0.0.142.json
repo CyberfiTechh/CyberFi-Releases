@@ -1,0 +1,52 @@
+{
+  "version": "0.0.142",
+  "sourceCommit": "766d7bfce90cd40f24b131ee31fa2efcac41011c",
+  "packages": [
+    {
+      "filename": "CyberFi-0.0.142-x64.exe",
+      "releaseId": 453070808,
+      "id": 772980701,
+      "size": 314697816,
+      "digest": "sha256:72aa17f13def1f5ba7c8a67f286594a8b868fd20b7113135f26fb49aeab88a19"
+    },
+    {
+      "filename": "CyberFi-0.0.142-x64.dmg",
+      "releaseId": 453076611,
+      "id": 772999845,
+      "size": 355512903,
+      "digest": "sha256:144bb18399b2e3c21a0ad5566b01fdef182c948acd0c45d3bb0dde42bb98bb3d"
+    },
+    {
+      "filename": "CyberFi-0.0.142-arm64.dmg",
+      "releaseId": 453076611,
+      "id": 773020587,
+      "size": 426877249,
+      "digest": "sha256:1dbb7349a39daf1965b38e0824a0152f95a45e7eea431ff0dd49c47ab971ab3c"
+    }
+  ],
+  "windowsFreshMcpCalls": 10,
+  "windowsAccountLawPassed": true,
+  "knownRamTest": "FAIL; user waived long rerun",
+  "limits": {
+    "macAccountLawCovered": false,
+    "macFreshTenMcpCovered": false,
+    "fullWebkitStressCovered": false,
+    "automaticInstallRelaunchCovered": false,
+    "osTrustedSigningCertified": false
+  },
+  "nativeArmRun": "https://github.com/CyberfiTechh/CyberFi-Releases/actions/runs/44801942620",
+  "releaseScopeDecision": {
+    "utc": "2026-11-20T19:16:24.552552+00:00",
+    "userAnswer": "Bilinen eksikleri belirterek yayımla",
+    "userExplicitlyApproved": true,
+    "publishWithDisclosedLimits": true,
+    "disclosedLimits": [
+      "longRamTestFailedAndRerunWaived",
+      "generalWebkitStressIncomplete",
+      "macAccountEndToEndNotVerified",
+      "realAutomaticInstallRelaunchNotYetTested"
+    ],
+    "automaticUpdateAttemptStillRequested": true,
+    "falsePassClaimsPermitted": false
+  }
+}
