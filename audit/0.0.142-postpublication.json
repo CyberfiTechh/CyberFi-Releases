@@ -1,0 +1,50 @@
+{
+  "version": "0.0.142",
+  "utc": "2026-11-20T20:00:49.679887+00:00",
+  "sourceCommit": "766d7bfce90cd40f24b131ee31fa2efcac41011c",
+  "windows": {
+    "publicDownloaderPayloadVerified": true,
+    "registeredVersion": "0.0.142",
+    "automaticInstallObserved": true,
+    "installerSpawnedApplicationObserved": true,
+    "manualReopenUsed": false,
+    "automaticProcessVersion": "0.0.142",
+    "automaticPid": 22036,
+    "installerParentPid": 26388,
+    "asarSha256": "50cd53a03230d0f4a2825e02356732effadcd789088b247a3cffce365c863ae0",
+    "originalProtectedFilesPreserved": true,
+    "defaultTestProfileRestoredAbsent": true,
+    "strictFullAcceptancePassed": false,
+    "profileSessionContinuityPassed": false,
+    "automaticVideoCovered": false,
+    "limitation": "The isolated automatic child used a different profile and was signed out; strict observer could not finish. This is not a full session-preservation PASS.",
+    "customOtherDriveTempUpdateSupported": false,
+    "crossVolumeFixtureFailedAndWasPreserved": true
+  },
+  "macos": {
+    "actualNativePublicOffer": "0.0.142",
+    "publicRsaManifestVerified": true,
+    "fullIntelDownloadRsaShaVerified": true,
+    "intelDownloadObservationHost": "win32",
+    "nativeInstallerStarted": false,
+    "automaticRelaunchVerified": false,
+    "guestFreeBytes": 3660259328,
+    "nativeTransactionRequiredBytes": 12884901888,
+    "accountLawCovered": false,
+    "safeShutdownCommandCompleted": true
+  },
+  "nativeArm": {
+    "passed": true,
+    "runId": 44801942620,
+    "url": "https://github.com/CyberfiTechh/CyberFi-Releases/actions/runs/44801942620",
+    "verifiedDistFiles": 556,
+    "videoFrames": 22
+  },
+  "longRamTest": {
+    "result": "FAIL",
+    "rerunWaivedByUser": true,
+    "fixed": false
+  },
+  "generalWebkitStressFullyPassed": false,
+  "releaseWithDisclosedLimitsApproved": true
+}
